@@ -6,7 +6,7 @@ __version__ = get_versions()["version"]
 del get_versions
 
 
-def make_version_tuple(vstr: str | None=None) -> tuple[int, ...]:
+def make_version_tuple(vstr: str | None = None) -> tuple[int, ...]:
     if vstr is None:
         vstr = __version__
     if vstr[0] == "v":

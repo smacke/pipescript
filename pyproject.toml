@@ -12,12 +12,11 @@ enabled = true
 [tool.black]
 line-length = 88
 target-version = ['py39']
-extend-exclude = '(^/nbpipes/__init__|^/versioneer|_version|)\.py'
+extend-exclude = '(^/versioneer|^/nbpipes/_version)\.py'
 
 [tool.isort]
 profile = 'black'
 extend_skip_glob = [
-    '**/nbpipes/__init__.py',
     '**/versioneer.py',
     '**/_version.py',
     '**/setup.py',
