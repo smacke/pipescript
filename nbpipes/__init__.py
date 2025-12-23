@@ -37,7 +37,7 @@ def load_ipython_extension(shell: InteractiveShell) -> None:
 
 	if not isinstance(shell, IPyflowInteractiveShell):
 		shell.run_line_magic("load_ext", "ipyflow.shell")
-		shell.run_line_magic("flow", "deregister dataflow")
+		shell.run_line_magic("flow", "deregister all")
 	assert isinstance(shell, IPyflowInteractiveShell)
 	shell.run_line_magic("flow", "register pyccolo.examples.PipelineTracer")
 	shell.run_line_magic("flow", "register pyccolo.examples.QuickLambdaTracer")
