@@ -64,14 +64,6 @@ class _ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
         return list(self.placeholder_names)
 
 
-class _IdentitySubscript:
-    def __getitem__(self, item):
-        return item
-
-
-_identity_subscript = _IdentitySubscript()
-
-
 def is_macro(node: ast.AST) -> bool:
     return (
         isinstance(node, ast.Subscript)
@@ -112,9 +104,15 @@ class MacroTracer(pyc.BaseTracer):
                 delattr(builtins, macro)
         self._extra_builtins.clear()
 
+    class _IdentitySubscript:
+        def __getitem__(self, item):
+            return item
+
+    _identity_subscript = _IdentitySubscript()
+
     @pyc.before_subscript_load(when=is_macro, reentrant=True)
     def load_macro_result(self, _ret, *_, **__):
-        return _identity_subscript
+        return self._identity_subscript
 
     _not_found = object()
 
