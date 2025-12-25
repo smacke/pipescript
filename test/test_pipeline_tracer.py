@@ -249,6 +249,7 @@ if sys.version_info >= (3, 8):  # noqa
             PipelineTracer.compose_dict_op_spec,
             PipelineTracer.compose_tuple_op_spec,
             PipelineTracer.compose_op_spec,
+            PipelineTracer.partial_call_spec,
             PipelineTracer.arg_placeholder_spec,
         ]
 

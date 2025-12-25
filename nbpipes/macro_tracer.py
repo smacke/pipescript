@@ -145,12 +145,14 @@ class MacroTracer(pyc.BaseTracer):
             with fast.location_of(ast_lambda):
                 arg = f"_{self._arg_replacer.arg_ctr}"
                 self._arg_replacer.arg_ctr += 1
+                starred_arg = f"_{self._arg_replacer.arg_ctr}"
+                self._arg_replacer.arg_ctr += 1
                 inner_func = func
                 if func == "ifilter":
                     inner_func = "filter"
                 elif func == "imap":
                     inner_func = "map"
-                lambda_body_str = f"{inner_func}(None, {arg})"
+                lambda_body_str = f"{inner_func}(None, {arg}, *{starred_arg})"
                 functor_lambda_body = cast(
                     ast.Call,
                     cast(
@@ -174,7 +176,10 @@ class MacroTracer(pyc.BaseTracer):
                     functor_lambda_body = functor_lambda_outer_body
                 functor_lambda = cast(
                     ast.Lambda,
-                    cast(ast.Expr, fast.parse(f"lambda {arg}: None").body[0]).value,
+                    cast(
+                        ast.Expr,
+                        fast.parse(f"lambda {arg}, *{starred_arg}: None").body[0],
+                    ).value,
                 )
                 functor_lambda.body = functor_lambda_body
             ast_lambda = functor_lambda

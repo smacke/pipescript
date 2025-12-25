@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+import functools
 import itertools
 import weakref
 from contextlib import contextmanager
@@ -290,8 +291,20 @@ def is_outer_or_allowlisted(node_or_id: ast.AST | int) -> bool:
     return False
 
 
+def partial_call_currier(func: Callable[..., Any]) -> Callable[..., Any]:
+    def make_curried_caller(*curried_args, **curried_kwargs):
+        @functools.wraps(func)
+        def wrapped_with_curried(*args, **kwargs):
+            return func(*curried_args, *args, **curried_kwargs, **kwargs)
+
+        return wrapped_with_curried
+
+    return make_curried_caller
+
+
 class PipelineTracer(pyc.BaseTracer):
 
+    allow_reentrant_events = True
     global_guards_enabled = False
 
     pipeline_dict_op_spec = pyc.AugmentationSpec(
@@ -358,6 +371,10 @@ class PipelineTracer(pyc.BaseTracer):
         aug_type=pyc.AugmentationType.binop, token=". ", replacement="| "
     )
 
+    partial_call_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.call, token="$(", replacement="("
+    )
+
     arg_placeholder_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.dot_prefix,
         token="$",
@@ -387,10 +404,16 @@ class PipelineTracer(pyc.BaseTracer):
         except ImportError:
             pass
 
+    @pyc.register_handler(pyc.before_call, reentrant=True)
+    def curry_partial_calls(self, ret, node: ast.Call, *_, **__):
+        if self.partial_call_spec in self.get_augmentations(id(node)):
+            return partial_call_currier(ret)
+        else:
+            return ret
+
     @pyc.register_handler(
         pyc.before_load_complex_symbol,
         when=is_outer_or_allowlisted,
-        reentrant=True,
     )
     def handle_chain_placeholder_rewrites(
         self, ret, node: ast.expr, frame: FrameType, *_, **__
@@ -517,7 +540,6 @@ class PipelineTracer(pyc.BaseTracer):
     @pyc.register_handler(
         pyc.before_right_binop_arg,
         when=lambda node: parent_is_bitor_op(node) and is_outer_or_allowlisted(node),
-        reentrant=True,
     )
     def transform_pipeline_rhs_placeholders(
         self, ret: object, node: ast.expr, frame: FrameType, *_, **__
@@ -573,7 +595,6 @@ class PipelineTracer(pyc.BaseTracer):
         pyc.before_binop,
         when=lambda node: isinstance(node.op, ast.BitOr)
         and is_outer_or_allowlisted(node),
-        reentrant=True,
     )
     def transform_pipeline_lhs_placeholders(
         self, ret: object, node: ast.BinOp, frame: FrameType, *_, **__
@@ -606,7 +627,6 @@ class PipelineTracer(pyc.BaseTracer):
         pyc.before_binop,
         when=lambda node: isinstance(node.op, ast.BitOr)
         and is_outer_or_allowlisted(node),
-        reentrant=True,
     )
     def transform_pipeline_op(
         self, ret: object, node: ast.BinOp, frame: FrameType, *_, **__
