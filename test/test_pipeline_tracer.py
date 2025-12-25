@@ -1,9 +1,13 @@
-# -*- coding: utf-8 -*-
+from __future__ import annotations
+
 import sys
 import textwrap
 
 import pyccolo as pyc
-from pyccolo.examples import OptionalChainer, PipelineTracer, QuickLambdaTracer
+from pyccolo.examples import OptionalChainer
+
+from nbpipes.macro_tracer import MacroTracer
+from nbpipes.pipeline_tracer import PipelineTracer
 
 if sys.version_info >= (3, 8):  # noqa
 
@@ -25,7 +29,7 @@ if sys.version_info >= (3, 8):  # noqa
 
     def test_value_first_partial_tuple_apply_then_apply_quick_lambda():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 assert pyc.eval("(1, 2) *$> f[_ + _ + _] <| 3") == 6
 
     def test_function_first_partial_apply_then_apply():
@@ -38,7 +42,7 @@ if sys.version_info >= (3, 8):  # noqa
 
     def test_function_first_partial_tuple_apply_then_apply_quick_lambda():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 assert pyc.eval("f[_ + _ + _] <$* (1, 2) <| 3") == 6
 
     def test_pipe_into_value_first_partial_apply():
@@ -51,12 +55,12 @@ if sys.version_info >= (3, 8):  # noqa
 
     def test_simple_pipeline_with_quick_lambda_map():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 assert pyc.eval("(1, 2, 3) |> f[map(f[_ + 1], _)] |> list") == [2, 3, 4]
 
     def test_pipeline_assignment():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 assert pyc.eval(
                     "(1, 2, 3) |> list |>> result |> f[map(f[_ + 1], _)] |> list |> f[result + _]"
                 ) == [1, 2, 3, 2, 3, 4]
@@ -98,17 +102,17 @@ if sys.version_info >= (3, 8):  # noqa
 
     def test_compose_op_with_parenthesized_quick_lambdas():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 assert pyc.eval("((f[_ * 5]) . (f[_ + 2]))(10)") == 60
 
     def test_compose_op_with_quick_lambdas():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 assert pyc.eval("(f[_ * 5] . f[_ + 2])(10)") == 60
 
     def test_pipeline_inside_quick_lambda():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 assert pyc.eval("2 |> f[$ |> $ + 2]") == 4
                 assert pyc.eval("2 |> f[$ |> f[_ + 2]]") == 4
 
@@ -124,7 +128,7 @@ if sys.version_info >= (3, 8):  # noqa
 
     def test_function_placeholder():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 # TODO: the commented out ones don't work due to an issue in how NamedExpr values don't get
                 #  bound to lambda closures, which is a weakness in pyccolo BEFORE_EXPR_EVENTS. Technically
                 #  BEFORE_EXPR_EVENTS should all be using the default value binding trick.
@@ -147,7 +151,7 @@ if sys.version_info >= (3, 8):  # noqa
 
     def test_tuple_unpack_with_placeholders():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 assert pyc.eval("($, $) *|> $ + $ <|* (1, 2)") == 3
                 assert pyc.eval("($, $) *|> $ + $ <|* (1, 2) |> $.real") == 3
                 assert pyc.eval("($, $) *|> $ + $ <|* (1, 2) |> $.imag") == 0
@@ -167,13 +171,13 @@ if sys.version_info >= (3, 8):  # noqa
 
     def test_named_placeholders_simple():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 assert pyc.eval("reduce[$x + $y]([1, 2, 3])") == 6
                 assert pyc.eval("sorted($lst, reverse=True)([1, 2, 3])") == [3, 2, 1]
 
     def test_named_placeholders_complex():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 assert (
                     pyc.eval(
                         "zip(['*', '+', '+'], [[2, 3, 4], [1, 2, 3], [4, 5, 6]]) "
@@ -311,7 +315,7 @@ if sys.version_info >= (3, 8):  # noqa
 
     def test_quick_maps():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 assert pyc.eval("['1', '2', '3'] |> map[int]") == [1, 2, 3]
                 assert pyc.eval("['1', '2', '3'] |> map[int($)]") == [1, 2, 3]
                 assert pyc.eval("['1', '2', '3'] |> map[int] |> map[$ % 2==0]") == [
@@ -330,7 +334,7 @@ if sys.version_info >= (3, 8):  # noqa
 
     def test_pipeline_map_with_quick_lambda_applied():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 assert pyc.eval("[[1, 2], [3, 4]] |> map[f[$ + $](*$)]") == [
                     3,
                     7,
@@ -338,7 +342,7 @@ if sys.version_info >= (3, 8):  # noqa
 
     def test_quick_reduce():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 assert pyc.eval("reduce[$ + $]([1, 2, 3, 4])") == 10
                 assert pyc.eval("reduce[f[$ + $]]([1, 2, 3, 4])") == 10
                 assert pyc.eval("reduce[$ + $] <| [1, 2, 3, 4]") == 10
@@ -348,7 +352,7 @@ if sys.version_info >= (3, 8):  # noqa
 
     def test_quick_filter():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 assert pyc.eval("filter[$ % 2 == 0]([1, 2, 3, 4, 5])") == [2, 4]
                 assert pyc.eval("filter[$ % 2 == 1]([1, 2, 3, 4, 5])") == [1, 3, 5]
                 assert pyc.eval("filter[$ % 2 == 0](range(5)) |> list") == [0, 2, 4]
@@ -356,7 +360,7 @@ if sys.version_info >= (3, 8):  # noqa
 
     def test_named_unpack():
         with PipelineTracer:
-            with QuickLambdaTracer:
+            with MacroTracer:
                 assert pyc.eval(
                     "'a: b c d' |> $.strip().split(': ') *|> ($, $.split())"
                 ) == ("a", ["b", "c", "d"])

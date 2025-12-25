@@ -15,8 +15,9 @@ __version__ = _version.get_versions()["version"]
 
 def load_ipython_extension(shell: InteractiveShell) -> None:
     from ipyflow.shell.interactiveshell import IPyflowInteractiveShell
-    from pyccolo.examples.pipeline_tracer import PipelineTracer
-    from pyccolo.examples.quick_lambda import QuickLambdaTracer
+
+    from nbpipes.macro_tracer import MacroTracer
+    from nbpipes.pipeline_tracer import PipelineTracer
 
     if not isinstance(shell, IPyflowInteractiveShell):
         shell.run_line_magic("load_ext", "ipyflow.shell")
@@ -27,6 +28,6 @@ def load_ipython_extension(shell: InteractiveShell) -> None:
     )
     shell.run_line_magic(
         "flow",
-        f"register {QuickLambdaTracer.__module__}.{QuickLambdaTracer.__name__}",
+        f"register {MacroTracer.__module__}.{MacroTracer.__name__}",
     )
     patch_completer(shell.Completer)
