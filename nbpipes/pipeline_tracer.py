@@ -532,9 +532,7 @@ class PipelineTracer(pyc.BaseTracer):
         )
         if not self.placeholder_replacer.search(node, allow_top_level=allow_top_level):
             return ret
-        transformed = cast(
-            ast.expr, StatementMapper.augmentation_propagating_copy(node)
-        )
+        transformed = StatementMapper.augmentation_propagating_copy(node)
         ast_lambda = self.transform_pipeline_placeholders(
             transformed, parent, frame.f_globals, allow_top_level=allow_top_level
         )
@@ -590,10 +588,7 @@ class PipelineTracer(pyc.BaseTracer):
         self.binop_arg_nodes_to_skip.add(id(node.left))
         self.binop_arg_nodes_to_skip.add(id(node.right))
         self.binop_nodes_to_eval.add(id(node))
-        transformed = cast(
-            ast.BinOp, StatementMapper.augmentation_propagating_copy(node)
-        )
-        left_arg = transformed
+        left_arg = transformed = StatementMapper.augmentation_propagating_copy(node)
         for _i in range(num_left_traversals_to_lhs_placeholder_node):
             left_arg = left_arg.left  # type: ignore[assignment]
         ast_lambda = self.transform_pipeline_placeholders(
