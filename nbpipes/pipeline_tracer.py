@@ -359,6 +359,18 @@ class PipelineTracer(pyc.BaseTracer):
         aug_type=pyc.AugmentationType.binop, token="<|", replacement="|"
     )
 
+    left_compose_dict_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.binop, token="**.>", replacement="|"
+    )
+
+    left_compose_tuple_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.binop, token="*.>", replacement="|"
+    )
+
+    left_compose_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.binop, token=".>", replacement="|"
+    )
+
     compose_dict_op_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.binop, token=".** ", replacement="| "
     )
@@ -670,6 +682,33 @@ class PipelineTracer(pyc.BaseTracer):
                 return __tuple_composed
 
             return __pipeline_dict_compose
+        elif self.left_compose_op_spec in this_node_augmentations:
+
+            def __left_pipeline_compose(f, g):
+                def __composed(*args, **kwargs):
+                    return __hide_pyccolo_frame__ and g(f(*args, **kwargs))
+
+                return __composed
+
+            return __left_pipeline_compose
+        elif self.left_compose_tuple_op_spec in this_node_augmentations:
+
+            def __left_pipeline_tuple_compose(f, g):
+                def __tuple_composed(*args, **kwargs):
+                    return g(*f(*args, **kwargs))
+
+                return __tuple_composed
+
+            return __left_pipeline_tuple_compose
+        elif self.left_compose_dict_op_spec in this_node_augmentations:
+
+            def __left_pipeline_dict_compose(f, g):
+                def __tuple_composed(*args, **kwargs):
+                    return g(**f(*args, **kwargs))
+
+                return __tuple_composed
+
+            return __left_pipeline_dict_compose
         elif self.pipeline_op_assign_spec in this_node_augmentations:
             rhs: ast.Name = node.right  # type: ignore
             if not isinstance(rhs, ast.Name):

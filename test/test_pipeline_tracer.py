@@ -364,3 +364,22 @@ if sys.version_info >= (3, 8):  # noqa
                 assert pyc.eval("[2, 3, 4] |> reduce[$ * $]$()") == 24
                 assert pyc.eval("[2, 3, 4] |> reduce[$ * $]($, 2)") == 48
                 assert pyc.eval("[2, 3, 4] |> reduce[$ * $]$($, 2)()") == 48
+
+    def test_left_function_composition():
+        with PipelineTracer:
+            with MacroTracer:
+                assert pyc.eval("([1], [2], [3, 4]) |> (list .> sum($, start=[]))") == [
+                    1,
+                    2,
+                    3,
+                    4,
+                ]
+                assert pyc.eval("([1], [2], [3, 4]) |> (sum($, start=[]) . list)") == [
+                    1,
+                    2,
+                    3,
+                    4,
+                ]
+                assert pyc.eval(
+                    "[[[1, 2], [3, 4]], [[5, 6]]] |> (sum($, start=[]) *.> zip .> map[list] .> list)"
+                ) == [[1, 3, 5], [2, 4, 6]]
