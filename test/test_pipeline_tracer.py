@@ -349,3 +349,18 @@ if sys.version_info >= (3, 8):  # noqa
                 assert pyc.eval(
                     "'a: b c d' |> $.strip().split(': ') *|> ($node, $adj.split()) *|> ($adj, $node)"
                 ) == (["b", "c", "d"], "a")
+
+    def test_partial_calls():
+        with PipelineTracer:
+            assert pyc.eval("[2, 3, 4] |> reduce$(lambda x, y: x * y)") == 24
+
+        with PipelineTracer:
+            with MacroTracer:
+                assert pyc.eval("[2, 3, 4] |> reduce$(f[$ * $])") == 24
+                assert pyc.eval("reduce[$ * $]$([2, 3, 4])()") == 24
+                assert pyc.eval("reduce[$ * $]$([2, 3, 4])(2)") == 48
+                assert pyc.eval("reduce[$ * $]$()([2, 3, 4])") == 24
+                assert pyc.eval("reduce[$ * $]$()([2, 3, 4], 2)") == 48
+                assert pyc.eval("[2, 3, 4] |> reduce[$ * $]$()") == 24
+                assert pyc.eval("[2, 3, 4] |> reduce[$ * $]($, 2)") == 48
+                assert pyc.eval("[2, 3, 4] |> reduce[$ * $]$($, 2)()") == 48
