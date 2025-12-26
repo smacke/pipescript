@@ -11,6 +11,7 @@ from types import FrameType
 from typing import Any, cast
 
 import pyccolo as pyc
+from IPython import get_ipython
 from pyccolo import fast
 from pyccolo.stmt_mapper import StatementMapper
 from pyccolo.trace_events import TraceEvent
@@ -86,6 +87,13 @@ class MacroTracer(pyc.BaseTracer):
         self._arg_replacer = _ArgReplacer()
         builtins.reduce = reduce  # type: ignore[attr-defined]
         builtins.imap = map  # type: ignore[attr-defined]
+        builtins.ifilter = filter  # type: ignore[attr-defined]
+        shell = get_ipython()
+        if shell is not None:
+            user_ns = shell.user_ns
+            user_ns["reduce"] = reduce
+            user_ns["imap"] = map
+            user_ns["ifilter"] = filter
         self.lambda_cache: dict[tuple[int, int, TraceEvent], Any] = {}
 
     def enter_tracing_hook(self) -> None:
