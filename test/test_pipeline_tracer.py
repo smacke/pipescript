@@ -396,8 +396,9 @@ if sys.version_info >= (3, 8):  # noqa
     def test_nullpipe_op():
         with PipelineTracer:
             assert pyc.eval("1 |> {0: 42, 1: None}[$] ?> $ + 1 ?> $ + 2") is None
-            # TODO: get this one working?
-            # assert pyc.eval("1 |> {0: 42, 1: None}[$] ?> $ + 1 |> $ + 2") is None
+            assert (
+                pyc.eval("1 |> {0: 42, 1: None}[$] ?> $ + 1 |> $ + 2 |> $ + 3") is None
+            )
             assert pyc.eval("0 |> {0: 42, 1: None}[$] ?> $ + 1 |> $ + 2") == 45
 
     def test_tuple_pipeline_lambda():

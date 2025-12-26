@@ -456,6 +456,8 @@ class PipelineTracer(pyc.BaseTracer):
         evaluated_lambda = pyc.eval(ast_lambda, frame.f_globals, frame.f_locals)
         return lambda *_, **__: __hide_pyccolo_frame__ and evaluated_lambda
 
+    pipeline_null = object()
+
     @pyc.register_handler(
         pyc.before_binop,
         when=lambda node: node_is_bitor_op(node) and is_outer_or_allowlisted(node),
@@ -467,14 +469,25 @@ class PipelineTracer(pyc.BaseTracer):
             self.binop_nodes_to_eval.remove(id(node))
             return ret
         __hide_pyccolo_frame__ = True
+        pipeline_null = self.pipeline_null
         frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node.left
         this_node_augmentations = self.get_augmentations(id(node))
         if self.pipeline_op_spec in this_node_augmentations:
-            return lambda x, y: __hide_pyccolo_frame__ and y(x)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null if x is pipeline_null else y(x)
+            )
         elif self.pipeline_tuple_op_spec in this_node_augmentations:
-            return lambda x, y: __hide_pyccolo_frame__ and y(*x)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if x is pipeline_null
+                else y(*x)
+            )
         elif self.pipeline_dict_op_spec in this_node_augmentations:
-            return lambda x, y: __hide_pyccolo_frame__ and y(**x)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if x is pipeline_null
+                else y(**x)
+            )
         elif self.pipeline_op_assign_spec in this_node_augmentations:
             rhs: ast.Name = node.right  # type: ignore
             if not isinstance(rhs, ast.Name):
@@ -488,63 +501,140 @@ class PipelineTracer(pyc.BaseTracer):
                 frame.f_globals[rhs.id] = val
                 return __hide_pyccolo_frame__ and val
 
-            return lambda x, y: __hide_pyccolo_frame__ and assign_globals(x)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if x is pipeline_null
+                else assign_globals(x)
+            )
         elif self.nullpipe_op_spec in this_node_augmentations:
-            return lambda x, y: __hide_pyccolo_frame__ and None if x is None else y(x)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if x in (None, pipeline_null)
+                else y(x)
+            )
         elif self.nullpipe_tuple_op_spec in this_node_augmentations:
-            return lambda x, y: __hide_pyccolo_frame__ and None if x is None else y(*x)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if x in (None, pipeline_null)
+                else y(*x)
+            )
         elif self.nullpipe_dict_op_spec in this_node_augmentations:
-            return lambda x, y: __hide_pyccolo_frame__ and None if x is None else y(**x)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if x in (None, pipeline_null)
+                else y(**x)
+            )
         elif self.value_first_left_partial_apply_op_spec in this_node_augmentations:
-            return lambda x, y: __hide_pyccolo_frame__ and (
-                lambda *args, **kwargs: __hide_pyccolo_frame__ and y(x, *args, **kwargs)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if x is pipeline_null
+                else (
+                    lambda *args, **kwargs: __hide_pyccolo_frame__
+                    and y(x, *args, **kwargs)
+                )
             )
         elif (
             self.value_first_left_partial_apply_tuple_op_spec in this_node_augmentations
         ):
-            return lambda x, y: __hide_pyccolo_frame__ and (
-                lambda *args, **kwargs: __hide_pyccolo_frame__
-                and y(*x, *args, **kwargs)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if x is pipeline_null
+                else (
+                    lambda *args, **kwargs: __hide_pyccolo_frame__
+                    and y(*x, *args, **kwargs)
+                )
             )
         elif (
             self.value_first_left_partial_apply_dict_op_spec in this_node_augmentations
         ):
-            return lambda x, y: __hide_pyccolo_frame__ and (
-                lambda *args, **kwargs: __hide_pyccolo_frame__
-                and y(*args, **x, **kwargs)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if x is pipeline_null
+                else (
+                    lambda *args, **kwargs: __hide_pyccolo_frame__
+                    and y(*args, **x, **kwargs)
+                )
             )
         elif self.function_first_left_partial_apply_op_spec in this_node_augmentations:
-            return lambda x, y: __hide_pyccolo_frame__ and (
-                lambda *args, **kwargs: __hide_pyccolo_frame__ and x(y, *args, **kwargs)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if y is pipeline_null
+                else (
+                    lambda *args, **kwargs: (
+                        __hide_pyccolo_frame__ and x(y, *args, **kwargs)
+                    )
+                )
             )
         elif (
             self.function_first_left_partial_apply_tuple_op_spec
             in this_node_augmentations
         ):
-            return lambda x, y: __hide_pyccolo_frame__ and (
-                lambda *args, **kwargs: __hide_pyccolo_frame__
-                and x(*y, *args, **kwargs)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if y is pipeline_null
+                else (
+                    lambda *args, **kwargs: __hide_pyccolo_frame__
+                    and x(*y, *args, **kwargs)
+                )
             )
         elif (
             self.function_first_left_partial_apply_dict_op_spec
             in this_node_augmentations
         ):
-            return lambda x, y: __hide_pyccolo_frame__ and (
-                lambda *args, **kwargs: __hide_pyccolo_frame__
-                and x(*args, **y, **kwargs)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if y is pipeline_null
+                else (
+                    lambda *args, **kwargs: __hide_pyccolo_frame__
+                    and x(*args, **y, **kwargs)
+                )
             )
         elif self.apply_op_spec in this_node_augmentations:
-            return lambda x, y: __hide_pyccolo_frame__ and x(y)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null if y is pipeline_null else x(y)
+            )
         elif self.apply_tuple_op_spec in this_node_augmentations:
-            return lambda x, y: __hide_pyccolo_frame__ and x(*y)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if y is pipeline_null
+                else x(*y)
+            )
         elif self.apply_dict_op_spec in this_node_augmentations:
-            return lambda x, y: __hide_pyccolo_frame__ and x(**y)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if y is pipeline_null
+                else x(**y)
+            )
         elif self.null_apply_op_spec in this_node_augmentations:
-            return lambda x, y: __hide_pyccolo_frame__ and None if y is None else x(y)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if y in (None, pipeline_null)
+                else x(y)
+            )
         elif self.null_apply_tuple_op_spec in this_node_augmentations:
-            return lambda x, y: __hide_pyccolo_frame__ and None if y is None else x(*y)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if y in (None, pipeline_null)
+                else x(*y)
+            )
         elif self.null_apply_dict_op_spec in this_node_augmentations:
-            return lambda x, y: __hide_pyccolo_frame__ and None if y is None else x(**y)
+            return lambda x, y: (
+                __hide_pyccolo_frame__ and pipeline_null
+                if y in (None, pipeline_null)
+                else x(**y)
+            )
+        else:
+            return ret
+
+    @pyc.register_handler(
+        pyc.after_binop,
+        when=lambda node: node_is_bitor_op(node)
+        and not parent_is_bitor_op(node)
+        and is_outer_or_allowlisted(node),
+    )
+    def coalesce_pipeline_null(self, ret, *_, **__):
+        if ret is self.pipeline_null:
+            return pyc.Null
         else:
             return ret
 
