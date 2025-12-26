@@ -8,254 +8,27 @@ from __future__ import annotations
 import ast
 import builtins
 import functools
-import itertools
-import weakref
 from contextlib import contextmanager
 from types import FrameType
 from typing import Any, Callable, Generator, Sequence, cast
 
 import pyccolo as pyc
-import pyccolo.fast as fast
 from pyccolo.examples.optional_chaining import OptionalChainer
 from pyccolo.stmt_mapper import StatementMapper
 from pyccolo.trace_events import TraceEvent
-from pyccolo.utils import clone_function
 
-try:
-    from executing.executing import find_node_ipython as orig_find_node_ipython
-
-    orig_find_node_ipython_cloned = clone_function(orig_find_node_ipython)  # type: ignore[arg-type]
-except ImportError:
-    orig_find_node_ipython = None  # type: ignore[assignment]
-    orig_find_node_ipython_cloned = None  # type: ignore[assignment]
-
-
-_frame_to_node_mapping: "weakref.WeakValueDictionary[tuple[str, int], ast.AST]" = (
-    weakref.WeakValueDictionary()
-)
-
-
-def find_node_ipython(frame, last_i, stmts, source):
-    decorator, node = orig_find_node_ipython_cloned(frame, last_i, stmts, source)
-    if decorator is None and node is None:
-        return None, _frame_to_node_mapping.get(
-            (frame.f_code.co_filename, frame.f_lineno)
-        )
-    else:
-        return decorator, node
-
-
-def patch_find_node_ipython():
-    if orig_find_node_ipython is None or orig_find_node_ipython_cloned is None:
-        return
-    orig_find_node_ipython.__code__ = find_node_ipython.__code__
-    orig_find_node_ipython.__globals__["orig_find_node_ipython_cloned"] = (
-        orig_find_node_ipython_cloned
-    )
-    orig_find_node_ipython.__globals__["_frame_to_node_mapping"] = (
-        _frame_to_node_mapping
-    )
-
-
-class ExtractNames(ast.NodeVisitor):
-    def __init__(self) -> None:
-        self.names: set[str] = set()
-
-    def visit_Lambda(self, node: ast.Lambda) -> None:
-        before_names = set(self.names)
-        self.generic_visit(node.body)
-        for arg in fast.iter_arguments(node.args):
-            if arg.arg not in before_names:
-                self.names.discard(arg.arg)
-
-    def visit_Name(self, node: ast.Name) -> None:
-        if (
-            node.id != "_"
-            and id(node)
-            not in PipelineTracer.augmented_node_ids_by_spec[
-                PipelineTracer.arg_placeholder_spec
-            ]
-        ):
-            self.names.add(node.id)
-
-    def generic_visit_comprehension(
-        self, node: ast.GeneratorExp | ast.DictComp | ast.ListComp | ast.SetComp
-    ) -> None:
-        before_names = set(self.names)
-        self.generic_visit(node)
-        after_names = self.names
-        self.names = set()
-        for gen in node.generators:
-            self.visit(gen.target)
-        # need to clear names referenced as targets since these
-        # do not need to be passed externally to any lambdas
-        for name in self.names:
-            if name not in before_names:
-                after_names.discard(name)
-        self.names = after_names
-
-    visit_GeneratorExp = visit_DictComp = visit_ListComp = visit_SetComp = (
-        generic_visit_comprehension
-    )
-
-    @classmethod
-    def extract_names(cls, node: ast.expr) -> set[str]:
-        visitor = cls()
-        visitor.visit(node)
-        return visitor.names
-
-
-class SingletonArgCounterMixin:
-    _arg_ctr = 0
-
-    @property
-    def arg_ctr(self) -> int:
-        return self._arg_ctr
-
-    @arg_ctr.setter
-    def arg_ctr(self, new_arg_ctr: int) -> None:
-        SingletonArgCounterMixin._arg_ctr = new_arg_ctr
-
-    @classmethod
-    def create_placeholder_lambda(
-        cls,
-        placeholder_names: list[str],
-        orig_ctr: int,
-        lambda_body: ast.expr,
-        frame_globals: dict[str, Any],
-    ) -> ast.Lambda:
-        num_lambda_args = cls._arg_ctr - orig_ctr
-        lambda_args = []
-        extra_defaults = ExtractNames.extract_names(lambda_body) - set(
-            placeholder_names
-        )
-        for arg_idx in range(orig_ctr, orig_ctr + num_lambda_args):
-            arg = f"_{arg_idx}"
-            lambda_args.append(arg)
-            extra_defaults.discard(arg)
-        lambda_args.extend(placeholder_names)
-        extra_defaults = {
-            arg
-            for arg in extra_defaults
-            if arg not in frame_globals and not hasattr(builtins, arg)
-        }
-        lambda_arg_str = ", ".join(
-            itertools.chain(lambda_args, (f"{arg}={arg}" for arg in extra_defaults))
-        )
-        return cast(
-            ast.Lambda,
-            cast(ast.Expr, ast.parse(f"lambda {lambda_arg_str}: None").body[0]).value,
-        )
-
-
-class PlaceholderReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
-    def __init__(self) -> None:
-        self.mutate = False
-        self.allow_top_level = False
-        self.placeholder_names: dict[str, None] = {}
-
-    @contextmanager
-    def disallow_top_level(self) -> Generator[None, None, None]:
-        old_allow_top_level = self.allow_top_level
-        try:
-            self.allow_top_level = False
-            yield
-        finally:
-            self.allow_top_level = old_allow_top_level
-
-    def visit_Call(self, node: ast.Call) -> None:
-        if not isinstance(node.func, ast.BinOp) or not PipelineTracer.get_augmentations(
-            id(node.func)
-        ):
-            self.visit(node.func)
-        if not self.allow_top_level:
-            # defer visiting nested calls
-            return
-        with self.disallow_top_level():
-            for arg in node.args:
-                self.visit(arg)
-            for kw in node.keywords:
-                self.visit(kw.value)
-
-    def visit_Subscript(self, node: ast.Subscript) -> None:
-        from pyccolo.examples.quick_lambda import QuickLambdaTracer
-
-        if (
-            isinstance(node.value, ast.Name)
-            and node.value.id in QuickLambdaTracer.lambda_macros
-        ):
-            # defer visiting nested quick lambdas
-            return
-        self.generic_visit(node)
-
-    def visit_BinOp(self, node: ast.BinOp) -> None:
-        if (
-            not self.allow_top_level
-            and isinstance(node.op, ast.BitOr)
-            and PipelineTracer.get_augmentations(id(node))
-        ):
-            # defer visiting nested pipeline ops
-            return
-        with self.disallow_top_level():
-            self.generic_visit(node)
-
-    def visit_Name(self, node: ast.Name) -> None:
-        if (
-            id(node)
-            not in PipelineTracer.augmented_node_ids_by_spec[
-                PipelineTracer.arg_placeholder_spec
-            ]
-        ):
-            return
-        assert node.id.startswith("_")
-        arg_ctr = self.arg_ctr
-        if node.id == "_":
-            self.arg_ctr += 1
-        else:
-            self.placeholder_names[node.id[1:]] = None
-        if not self.mutate:
-            return
-        if node.id == "_":
-            node.id = f"_{arg_ctr}"
-        else:
-            node.id = node.id[1:]
-        PipelineTracer.augmented_node_ids_by_spec[
-            PipelineTracer.arg_placeholder_spec
-        ].discard(id(node))
-
-    def search(self, node: ast.AST | Sequence[ast.AST], allow_top_level: bool) -> bool:
-        if isinstance(node, list):
-            return any(
-                self.search(inner, allow_top_level=allow_top_level) for inner in node
-            )
-        assert isinstance(node, ast.AST)
-        orig_ctr = self.arg_ctr
-        try:
-            self.allow_top_level = allow_top_level
-            self.visit(node)
-            found = self.arg_ctr > orig_ctr or len(self.placeholder_names) > 0
-        finally:
-            self.arg_ctr = orig_ctr
-            self.placeholder_names.clear()
-        return found
-
-    def rewrite(self, node: ast.expr, allow_top_level: bool) -> list[str]:
-        old_mutate = self.mutate
-        try:
-            self.mutate = True
-            self.allow_top_level = allow_top_level
-            self.visit(node)
-            ret = self.placeholder_names
-        finally:
-            self.mutate = old_mutate
-            self.placeholder_names = {}
-        return list(ret.keys())
+from nbpipes.placeholders import PlaceholderReplacer, SingletonArgCounterMixin
+from nbpipes.traceback_patch import frame_to_node_mapping, patch_find_node_ipython
 
 
 def parent_is_bitor_op(node_or_id: ast.expr | int) -> bool:
     node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
     parent = pyc.BaseTracer.containing_ast_by_id.get(node_id)
-    return isinstance(parent, ast.BinOp) and isinstance(parent.op, ast.BitOr)
+    return (
+        isinstance(parent, ast.BinOp)
+        and isinstance(parent.op, ast.BitOr)
+        and bool(PipelineTracer.get_augmentations(id(parent)))
+    )
 
 
 @contextmanager
@@ -393,7 +166,7 @@ class PipelineTracer(pyc.BaseTracer):
         replacement="_",
     )
 
-    placeholder_replacer = PlaceholderReplacer()
+    placeholder_replacer = PlaceholderReplacer(arg_placeholder_spec)
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -435,7 +208,7 @@ class PipelineTracer(pyc.BaseTracer):
         if not self.placeholder_replacer.search(node, allow_top_level=True):
             return ret
         __hide_pyccolo_frame__ = True
-        _frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node
+        frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node
         node_copy = StatementMapper.augmentation_propagating_copy(node)
         assert isinstance(node_copy, ast.expr)
         orig_ctr = self.placeholder_replacer.arg_ctr
@@ -560,7 +333,7 @@ class PipelineTracer(pyc.BaseTracer):
         if not self.get_augmentations(id(parent)):
             return ret
         __hide_pyccolo_frame__ = True
-        _frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node
+        frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node
         allow_top_level = not isinstance(node, ast.BinOp) or not self.get_augmentations(
             id(node)
         )
@@ -617,7 +390,7 @@ class PipelineTracer(pyc.BaseTracer):
         if num_left_traversals_to_lhs_placeholder_node < 0:
             return ret
         __hide_pyccolo_frame__ = True
-        _frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node
+        frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node
         self.binop_arg_nodes_to_skip.add(id(node.left))
         self.binop_arg_nodes_to_skip.add(id(node.right))
         self.binop_nodes_to_eval.add(id(node))
@@ -647,7 +420,7 @@ class PipelineTracer(pyc.BaseTracer):
             self.binop_nodes_to_eval.remove(id(node))
             return ret
         __hide_pyccolo_frame__ = True
-        _frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node.left
+        frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node.left
         this_node_augmentations = self.get_augmentations(id(node))
         if self.pipeline_op_spec in this_node_augmentations:
             return lambda x, y: __hide_pyccolo_frame__ and y(x)

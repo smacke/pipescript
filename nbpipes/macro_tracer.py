@@ -15,7 +15,8 @@ from pyccolo import fast
 from pyccolo.stmt_mapper import StatementMapper
 from pyccolo.trace_events import TraceEvent
 
-from nbpipes.pipeline_tracer import PipelineTracer, SingletonArgCounterMixin
+from nbpipes.pipeline_tracer import PipelineTracer
+from nbpipes.placeholders import SingletonArgCounterMixin
 
 
 class _ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):

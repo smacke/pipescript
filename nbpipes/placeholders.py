@@ -1,0 +1,157 @@
+from __future__ import annotations
+
+import ast
+import builtins
+import itertools
+from contextlib import contextmanager
+from typing import Any, Generator, Sequence, cast
+
+import pyccolo as pyc
+
+from nbpipes.extract_names import ExtractNames
+
+
+class SingletonArgCounterMixin:
+    _arg_ctr = 0
+
+    @property
+    def arg_ctr(self) -> int:
+        return self._arg_ctr
+
+    @arg_ctr.setter
+    def arg_ctr(self, new_arg_ctr: int) -> None:
+        SingletonArgCounterMixin._arg_ctr = new_arg_ctr
+
+    @classmethod
+    def create_placeholder_lambda(
+        cls,
+        placeholder_names: list[str],
+        orig_ctr: int,
+        lambda_body: ast.expr,
+        frame_globals: dict[str, Any],
+    ) -> ast.Lambda:
+        num_lambda_args = cls._arg_ctr - orig_ctr
+        lambda_args = []
+        extra_defaults = ExtractNames.extract_names(lambda_body) - set(
+            placeholder_names
+        )
+        for arg_idx in range(orig_ctr, orig_ctr + num_lambda_args):
+            arg = f"_{arg_idx}"
+            lambda_args.append(arg)
+            extra_defaults.discard(arg)
+        lambda_args.extend(placeholder_names)
+        extra_defaults = {
+            arg
+            for arg in extra_defaults
+            if arg not in frame_globals and not hasattr(builtins, arg)
+        }
+        lambda_arg_str = ", ".join(
+            itertools.chain(lambda_args, (f"{arg}={arg}" for arg in extra_defaults))
+        )
+        return cast(
+            ast.Lambda,
+            cast(ast.Expr, ast.parse(f"lambda {lambda_arg_str}: None").body[0]).value,
+        )
+
+
+class PlaceholderReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
+    def __init__(self, arg_placeholder_spec: pyc.AugmentationSpec) -> None:
+        self.mutate = False
+        self.allow_top_level = False
+        self.placeholder_names: dict[str, None] = {}
+        self.arg_placeholder_spec = arg_placeholder_spec
+
+    @contextmanager
+    def disallow_top_level(self) -> Generator[None, None, None]:
+        old_allow_top_level = self.allow_top_level
+        try:
+            self.allow_top_level = False
+            yield
+        finally:
+            self.allow_top_level = old_allow_top_level
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if not isinstance(node.func, ast.BinOp) or not pyc.BaseTracer.get_augmentations(
+            id(node.func)
+        ):
+            self.visit(node.func)
+        if not self.allow_top_level:
+            # defer visiting nested calls
+            return
+        with self.disallow_top_level():
+            for arg in node.args:
+                self.visit(arg)
+            for kw in node.keywords:
+                self.visit(kw.value)
+
+    def visit_Subscript(self, node: ast.Subscript) -> None:
+        from pyccolo.examples.quick_lambda import QuickLambdaTracer
+
+        if (
+            isinstance(node.value, ast.Name)
+            and node.value.id in QuickLambdaTracer.lambda_macros
+        ):
+            # defer visiting nested quick lambdas
+            return
+        self.generic_visit(node)
+
+    def visit_BinOp(self, node: ast.BinOp) -> None:
+        if (
+            not self.allow_top_level
+            and isinstance(node.op, ast.BitOr)
+            and pyc.BaseTracer.get_augmentations(id(node))
+        ):
+            # defer visiting nested pipeline ops
+            return
+        with self.disallow_top_level():
+            self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if (
+            id(node)
+            not in pyc.BaseTracer.augmented_node_ids_by_spec[self.arg_placeholder_spec]
+        ):
+            return
+        assert node.id.startswith("_")
+        arg_ctr = self.arg_ctr
+        if node.id == "_":
+            self.arg_ctr += 1
+        else:
+            self.placeholder_names[node.id[1:]] = None
+        if not self.mutate:
+            return
+        if node.id == "_":
+            node.id = f"_{arg_ctr}"
+        else:
+            node.id = node.id[1:]
+        pyc.BaseTracer.augmented_node_ids_by_spec[self.arg_placeholder_spec].discard(
+            id(node)
+        )
+
+    def search(self, node: ast.AST | Sequence[ast.AST], allow_top_level: bool) -> bool:
+        if isinstance(node, list):
+            return any(
+                self.search(inner, allow_top_level=allow_top_level) for inner in node
+            )
+        assert isinstance(node, ast.AST)
+        orig_ctr = self.arg_ctr
+        try:
+            self.allow_top_level = allow_top_level
+            self.visit(node)
+            found = self.arg_ctr > orig_ctr or len(self.placeholder_names) > 0
+        finally:
+            self.arg_ctr = orig_ctr
+            self.placeholder_names.clear()
+        return found
+
+    def rewrite(self, node: ast.expr, allow_top_level: bool) -> list[str]:
+        old_mutate = self.mutate
+        try:
+            self.mutate = True
+            self.allow_top_level = allow_top_level
+            self.visit(node)
+            ret = self.placeholder_names
+        finally:
+            self.mutate = old_mutate
+            self.placeholder_names = {}
+        return list(ret.keys())
