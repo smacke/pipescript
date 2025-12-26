@@ -21,9 +21,7 @@ from nbpipes.placeholders import PlaceholderReplacer, SingletonArgCounterMixin
 from nbpipes.traceback_patch import frame_to_node_mapping, patch_find_node_ipython
 
 
-def node_is_bitor_op(node_or_id: ast.AST | int) -> bool:
-    node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
-    node = pyc.BaseTracer.ast_node_by_id.get(node_id)
+def node_is_bitor_op(node: ast.AST | None) -> bool:
     return (
         isinstance(node, ast.BinOp)
         and isinstance(node.op, ast.BitOr)
@@ -31,9 +29,7 @@ def node_is_bitor_op(node_or_id: ast.AST | int) -> bool:
     )
 
 
-def node_is_pow_op(node_or_id: ast.AST | int) -> bool:
-    node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
-    node = pyc.BaseTracer.ast_node_by_id.get(node_id)
+def node_is_pow_op(node: ast.AST | None) -> bool:
     return (
         isinstance(node, ast.BinOp)
         and isinstance(node.op, ast.Pow)
@@ -42,7 +38,11 @@ def node_is_pow_op(node_or_id: ast.AST | int) -> bool:
 
 
 def node_is_binop(node_or_id: ast.AST | int) -> bool:
-    return node_is_bitor_op(node_or_id) or node_is_pow_op(node_or_id)
+    if isinstance(node_or_id, int):
+        node = pyc.BaseTracer.ast_node_by_id.get(node_or_id)
+    else:
+        node = node_or_id
+    return node_is_bitor_op(node) or node_is_pow_op(node)
 
 
 def parent_is_bitor_op(node_or_id: ast.expr | int) -> bool:
