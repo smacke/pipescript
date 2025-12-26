@@ -79,6 +79,9 @@ def partial_call_currier(func: Callable[..., Any]) -> Callable[..., Any]:
     return make_curried_caller
 
 
+_skip_binop_args_lambda = lambda: None
+
+
 class PipelineTracer(pyc.BaseTracer):
 
     allow_reentrant_events = True
@@ -318,7 +321,7 @@ class PipelineTracer(pyc.BaseTracer):
     def maybe_skip_binop_arg(self, ret: object, node_id: int, *_, **__):
         if node_id in self.binop_arg_nodes_to_skip:
             self.binop_arg_nodes_to_skip.remove(node_id)
-            return lambda: None
+            return _skip_binop_args_lambda
         else:
             return ret
 
@@ -352,12 +355,12 @@ class PipelineTracer(pyc.BaseTracer):
         placeholder_names = self.placeholder_replacer.rewrite(
             node, allow_top_level=allow_top_level
         )
-        placeholder_names = self.reorder_placeholder_names_for_prior_positions(
-            parent.left, placeholder_names
-        )
         self.placeholder_arg_position_cache[id(parent)] = [
             name for name in placeholder_names if not name[1].isdigit()
         ]
+        placeholder_names = self.reorder_placeholder_names_for_prior_positions(
+            parent.left, placeholder_names
+        )
         return SingletonArgCounterMixin.create_placeholder_lambda(
             placeholder_names, orig_ctr, full_node or node, frame_globals
         )
@@ -369,6 +372,8 @@ class PipelineTracer(pyc.BaseTracer):
     def transform_pipeline_rhs_placeholders(
         self, ret: object, node: ast.expr, frame: FrameType, *_, **__
     ):
+        if ret is _skip_binop_args_lambda:
+            return ret
         parent: ast.BinOp = self.containing_ast_by_id.get(id(node))  # type: ignore[assignment]
         if not self.get_augmentations(id(parent)):
             return ret
