@@ -174,6 +174,18 @@ class PipelineTracer(pyc.BaseTracer):
         aug_type=pyc.AugmentationType.binop, token=".>", replacement="**"
     )
 
+    alt_compose_dict_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.binop, token="<.**", replacement="**"
+    )
+
+    alt_compose_tuple_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.binop, token="<.*", replacement="**"
+    )
+
+    alt_compose_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.binop, token="<.", replacement="**"
+    )
+
     compose_dict_op_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.binop, token=".** ", replacement="** "
     )
@@ -530,7 +542,7 @@ class PipelineTracer(pyc.BaseTracer):
         __hide_pyccolo_frame__ = True
         frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node.left
         this_node_augmentations = self.get_augmentations(id(node))
-        if self.compose_op_spec in this_node_augmentations:
+        if {self.compose_op_spec, self.alt_compose_op_spec} & this_node_augmentations:
 
             def __pipeline_compose(f, g):
                 def __composed(*args, **kwargs):
@@ -539,7 +551,10 @@ class PipelineTracer(pyc.BaseTracer):
                 return __composed
 
             return __pipeline_compose
-        elif self.compose_tuple_op_spec in this_node_augmentations:
+        elif {
+            self.compose_tuple_op_spec,
+            self.alt_compose_tuple_op_spec,
+        } & this_node_augmentations:
 
             def __pipeline_tuple_compose(f, g):
                 def __tuple_composed(*args, **kwargs):
@@ -548,7 +563,10 @@ class PipelineTracer(pyc.BaseTracer):
                 return __tuple_composed
 
             return __pipeline_tuple_compose
-        elif self.compose_dict_op_spec in this_node_augmentations:
+        elif {
+            self.compose_dict_op_spec,
+            self.alt_compose_dict_op_spec,
+        } & this_node_augmentations:
 
             def __pipeline_dict_compose(f, g):
                 def __tuple_composed(*args, **kwargs):
