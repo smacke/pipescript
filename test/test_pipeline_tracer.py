@@ -383,3 +383,23 @@ if sys.version_info >= (3, 8):  # noqa
                 assert pyc.eval(
                     "[[[1, 2], [3, 4]], [[5, 6]]] |> (sum($, start=[]) *.> zip .> map[list] .> list)"
                 ) == [[1, 3, 5], [2, 4, 6]]
+
+    def test_composition_precedence():
+        # same as previous test but ensure parens not necessary for composition part
+        with PipelineTracer:
+            with MacroTracer:
+                assert pyc.eval("([1], [2], [3, 4]) |> list .> sum($, start=[])") == [
+                    1,
+                    2,
+                    3,
+                    4,
+                ]
+                assert pyc.eval("([1], [2], [3, 4]) |> sum($, start=[]) . list") == [
+                    1,
+                    2,
+                    3,
+                    4,
+                ]
+                assert pyc.eval(
+                    "[[[1, 2], [3, 4]], [[5, 6]]] |> sum($, start=[]) *.> zip .> map[list] .> list"
+                ) == [[1, 3, 5], [2, 4, 6]]

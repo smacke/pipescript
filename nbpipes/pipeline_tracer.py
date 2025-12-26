@@ -21,14 +21,44 @@ from nbpipes.placeholders import PlaceholderReplacer, SingletonArgCounterMixin
 from nbpipes.traceback_patch import frame_to_node_mapping, patch_find_node_ipython
 
 
+def node_is_bitor_op(node_or_id: ast.AST | int) -> bool:
+    node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
+    node = pyc.BaseTracer.ast_node_by_id.get(node_id)
+    return (
+        isinstance(node, ast.BinOp)
+        and isinstance(node.op, ast.BitOr)
+        and bool(PipelineTracer.get_augmentations(id(node)))
+    )
+
+
+def node_is_mult_op(node_or_id: ast.AST | int) -> bool:
+    node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
+    node = pyc.BaseTracer.ast_node_by_id.get(node_id)
+    return (
+        isinstance(node, ast.BinOp)
+        and isinstance(node.op, ast.Mult)
+        and bool(PipelineTracer.get_augmentations(id(node)))
+    )
+
+
+def node_is_binop(node_or_id: ast.AST | int) -> bool:
+    return node_is_bitor_op(node_or_id) or node_is_mult_op(node_or_id)
+
+
 def parent_is_bitor_op(node_or_id: ast.expr | int) -> bool:
     node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
     parent = pyc.BaseTracer.containing_ast_by_id.get(node_id)
-    return (
-        isinstance(parent, ast.BinOp)
-        and isinstance(parent.op, ast.BitOr)
-        and bool(PipelineTracer.get_augmentations(id(parent)))
-    )
+    return node_is_bitor_op(parent)
+
+
+def parent_is_mult_op(node_or_id: ast.expr | int) -> bool:
+    node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
+    parent = pyc.BaseTracer.containing_ast_by_id.get(node_id)
+    return node_is_mult_op(parent)
+
+
+def parent_is_binop(node_or_id: ast.expr | int) -> bool:
+    return parent_is_bitor_op(node_or_id) or parent_is_mult_op(node_or_id)
 
 
 @contextmanager
@@ -133,27 +163,27 @@ class PipelineTracer(pyc.BaseTracer):
     )
 
     left_compose_dict_op_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.binop, token="**.>", replacement="|"
+        aug_type=pyc.AugmentationType.binop, token="**.>", replacement="*"
     )
 
     left_compose_tuple_op_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.binop, token="*.>", replacement="|"
+        aug_type=pyc.AugmentationType.binop, token="*.>", replacement="*"
     )
 
     left_compose_op_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.binop, token=".>", replacement="|"
+        aug_type=pyc.AugmentationType.binop, token=".>", replacement="*"
     )
 
     compose_dict_op_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.binop, token=".** ", replacement="| "
+        aug_type=pyc.AugmentationType.binop, token=".** ", replacement="* "
     )
 
     compose_tuple_op_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.binop, token=".* ", replacement="| "
+        aug_type=pyc.AugmentationType.binop, token=".* ", replacement="* "
     )
 
     compose_op_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.binop, token=". ", replacement="| "
+        aug_type=pyc.AugmentationType.binop, token=". ", replacement="* "
     )
 
     partial_call_spec = pyc.AugmentationSpec(
@@ -273,7 +303,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     @pyc.register_raw_handler(
         (pyc.before_left_binop_arg, pyc.before_right_binop_arg),
-        when=lambda node: parent_is_bitor_op(node) and is_outer_or_allowlisted(node),
+        when=lambda node: parent_is_binop(node) and is_outer_or_allowlisted(node),
     )
     def maybe_skip_binop_arg(self, ret: object, node_id: int, *_, **__):
         if node_id in self.binop_arg_nodes_to_skip:
@@ -324,7 +354,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     @pyc.register_handler(
         pyc.before_right_binop_arg,
-        when=lambda node: parent_is_bitor_op(node) and is_outer_or_allowlisted(node),
+        when=lambda node: parent_is_binop(node) and is_outer_or_allowlisted(node),
     )
     def transform_pipeline_rhs_placeholders(
         self, ret: object, node: ast.expr, frame: FrameType, *_, **__
@@ -378,8 +408,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     @pyc.register_handler(
         pyc.before_binop,
-        when=lambda node: isinstance(node.op, ast.BitOr)
-        and is_outer_or_allowlisted(node),
+        when=lambda node: node_is_binop(node) and is_outer_or_allowlisted(node),
     )
     def transform_pipeline_lhs_placeholders(
         self, ret: object, node: ast.BinOp, frame: FrameType, *_, **__
@@ -410,10 +439,9 @@ class PipelineTracer(pyc.BaseTracer):
 
     @pyc.register_handler(
         pyc.before_binop,
-        when=lambda node: isinstance(node.op, ast.BitOr)
-        and is_outer_or_allowlisted(node),
+        when=lambda node: node_is_bitor_op(node) and is_outer_or_allowlisted(node),
     )
-    def transform_pipeline_op(
+    def transform_pipeline_apply_ops(
         self, ret: object, node: ast.BinOp, frame: FrameType, *_, **__
     ):
         if id(node) in self.binop_nodes_to_eval:
@@ -428,60 +456,6 @@ class PipelineTracer(pyc.BaseTracer):
             return lambda x, y: __hide_pyccolo_frame__ and y(*x)
         elif self.pipeline_dict_op_spec in this_node_augmentations:
             return lambda x, y: __hide_pyccolo_frame__ and y(**x)
-        elif self.compose_op_spec in this_node_augmentations:
-
-            def __pipeline_compose(f, g):
-                def __composed(*args, **kwargs):
-                    return __hide_pyccolo_frame__ and f(g(*args, **kwargs))
-
-                return __composed
-
-            return __pipeline_compose
-        elif self.compose_tuple_op_spec in this_node_augmentations:
-
-            def __pipeline_tuple_compose(f, g):
-                def __tuple_composed(*args, **kwargs):
-                    return f(*g(*args, **kwargs))
-
-                return __tuple_composed
-
-            return __pipeline_tuple_compose
-        elif self.compose_dict_op_spec in this_node_augmentations:
-
-            def __pipeline_dict_compose(f, g):
-                def __tuple_composed(*args, **kwargs):
-                    return f(**g(*args, **kwargs))
-
-                return __tuple_composed
-
-            return __pipeline_dict_compose
-        elif self.left_compose_op_spec in this_node_augmentations:
-
-            def __left_pipeline_compose(f, g):
-                def __composed(*args, **kwargs):
-                    return __hide_pyccolo_frame__ and g(f(*args, **kwargs))
-
-                return __composed
-
-            return __left_pipeline_compose
-        elif self.left_compose_tuple_op_spec in this_node_augmentations:
-
-            def __left_pipeline_tuple_compose(f, g):
-                def __tuple_composed(*args, **kwargs):
-                    return g(*f(*args, **kwargs))
-
-                return __tuple_composed
-
-            return __left_pipeline_tuple_compose
-        elif self.left_compose_dict_op_spec in this_node_augmentations:
-
-            def __left_pipeline_dict_compose(f, g):
-                def __tuple_composed(*args, **kwargs):
-                    return g(**f(*args, **kwargs))
-
-                return __tuple_composed
-
-            return __left_pipeline_dict_compose
         elif self.pipeline_op_assign_spec in this_node_augmentations:
             rhs: ast.Name = node.right  # type: ignore
             if not isinstance(rhs, ast.Name):
@@ -540,5 +514,75 @@ class PipelineTracer(pyc.BaseTracer):
             return lambda x, y: __hide_pyccolo_frame__ and x(*y)
         elif self.apply_dict_op_spec in this_node_augmentations:
             return lambda x, y: __hide_pyccolo_frame__ and x(**y)
+        else:
+            return ret
+
+    @pyc.register_handler(
+        pyc.before_binop,
+        when=lambda node: node_is_mult_op(node) and is_outer_or_allowlisted(node),
+    )
+    def transform_pipeline_compose_ops(
+        self, ret: object, node: ast.BinOp, frame: FrameType, *_, **__
+    ):
+        if id(node) in self.binop_nodes_to_eval:
+            self.binop_nodes_to_eval.remove(id(node))
+            return ret
+        __hide_pyccolo_frame__ = True
+        frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node.left
+        this_node_augmentations = self.get_augmentations(id(node))
+        if self.compose_op_spec in this_node_augmentations:
+
+            def __pipeline_compose(f, g):
+                def __composed(*args, **kwargs):
+                    return __hide_pyccolo_frame__ and f(g(*args, **kwargs))
+
+                return __composed
+
+            return __pipeline_compose
+        elif self.compose_tuple_op_spec in this_node_augmentations:
+
+            def __pipeline_tuple_compose(f, g):
+                def __tuple_composed(*args, **kwargs):
+                    return f(*g(*args, **kwargs))
+
+                return __tuple_composed
+
+            return __pipeline_tuple_compose
+        elif self.compose_dict_op_spec in this_node_augmentations:
+
+            def __pipeline_dict_compose(f, g):
+                def __tuple_composed(*args, **kwargs):
+                    return f(**g(*args, **kwargs))
+
+                return __tuple_composed
+
+            return __pipeline_dict_compose
+        elif self.left_compose_op_spec in this_node_augmentations:
+
+            def __left_pipeline_compose(f, g):
+                def __composed(*args, **kwargs):
+                    return __hide_pyccolo_frame__ and g(f(*args, **kwargs))
+
+                return __composed
+
+            return __left_pipeline_compose
+        elif self.left_compose_tuple_op_spec in this_node_augmentations:
+
+            def __left_pipeline_tuple_compose(f, g):
+                def __tuple_composed(*args, **kwargs):
+                    return g(*f(*args, **kwargs))
+
+                return __tuple_composed
+
+            return __left_pipeline_tuple_compose
+        elif self.left_compose_dict_op_spec in this_node_augmentations:
+
+            def __left_pipeline_dict_compose(f, g):
+                def __tuple_composed(*args, **kwargs):
+                    return g(**f(*args, **kwargs))
+
+                return __tuple_composed
+
+            return __left_pipeline_dict_compose
         else:
             return ret
