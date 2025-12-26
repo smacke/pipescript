@@ -24,3 +24,7 @@ def patch_completer(completer: Completer) -> None:
                 return super().completions(text, offset)
 
     completer.__class__ = PatchedCompleter
+
+
+def unpatch_completer(completer: Completer) -> None:
+    completer.__class__ = completer.__class__.mro()[1]
