@@ -31,18 +31,18 @@ def node_is_bitor_op(node_or_id: ast.AST | int) -> bool:
     )
 
 
-def node_is_mult_op(node_or_id: ast.AST | int) -> bool:
+def node_is_pow_op(node_or_id: ast.AST | int) -> bool:
     node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
     node = pyc.BaseTracer.ast_node_by_id.get(node_id)
     return (
         isinstance(node, ast.BinOp)
-        and isinstance(node.op, ast.Mult)
+        and isinstance(node.op, ast.Pow)
         and bool(PipelineTracer.get_augmentations(id(node)))
     )
 
 
 def node_is_binop(node_or_id: ast.AST | int) -> bool:
-    return node_is_bitor_op(node_or_id) or node_is_mult_op(node_or_id)
+    return node_is_bitor_op(node_or_id) or node_is_pow_op(node_or_id)
 
 
 def parent_is_bitor_op(node_or_id: ast.expr | int) -> bool:
@@ -51,14 +51,14 @@ def parent_is_bitor_op(node_or_id: ast.expr | int) -> bool:
     return node_is_bitor_op(parent)
 
 
-def parent_is_mult_op(node_or_id: ast.expr | int) -> bool:
+def parent_is_pow_op(node_or_id: ast.expr | int) -> bool:
     node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
     parent = pyc.BaseTracer.containing_ast_by_id.get(node_id)
-    return node_is_mult_op(parent)
+    return node_is_pow_op(parent)
 
 
 def parent_is_binop(node_or_id: ast.expr | int) -> bool:
-    return parent_is_bitor_op(node_or_id) or parent_is_mult_op(node_or_id)
+    return parent_is_bitor_op(node_or_id) or parent_is_pow_op(node_or_id)
 
 
 @contextmanager
@@ -163,27 +163,27 @@ class PipelineTracer(pyc.BaseTracer):
     )
 
     left_compose_dict_op_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.binop, token="**.>", replacement="*"
+        aug_type=pyc.AugmentationType.binop, token="**.>", replacement="**"
     )
 
     left_compose_tuple_op_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.binop, token="*.>", replacement="*"
+        aug_type=pyc.AugmentationType.binop, token="*.>", replacement="**"
     )
 
     left_compose_op_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.binop, token=".>", replacement="*"
+        aug_type=pyc.AugmentationType.binop, token=".>", replacement="**"
     )
 
     compose_dict_op_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.binop, token=".** ", replacement="* "
+        aug_type=pyc.AugmentationType.binop, token=".** ", replacement="** "
     )
 
     compose_tuple_op_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.binop, token=".* ", replacement="* "
+        aug_type=pyc.AugmentationType.binop, token=".* ", replacement="** "
     )
 
     compose_op_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.binop, token=". ", replacement="* "
+        aug_type=pyc.AugmentationType.binop, token=". ", replacement="** "
     )
 
     partial_call_spec = pyc.AugmentationSpec(
@@ -519,7 +519,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     @pyc.register_handler(
         pyc.before_binop,
-        when=lambda node: node_is_mult_op(node) and is_outer_or_allowlisted(node),
+        when=lambda node: node_is_pow_op(node) and is_outer_or_allowlisted(node),
     )
     def transform_pipeline_compose_ops(
         self, ret: object, node: ast.BinOp, frame: FrameType, *_, **__
