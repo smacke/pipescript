@@ -54,10 +54,15 @@ class SingletonArgCounterMixin:
         )
 
 
+# TODO: this analysis logic is doing double duty for chain transformations and pipeline step transformations,
+#  leading to some confusing logic / flags, e.g. `check_all_calls` and `allow_top_level`. Probably the common
+#  functionality should be extracted and two separate classes used for each type of transformation.
+#  `allow_top_level` is still probably sound as a flag.
 class PlaceholderReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
     def __init__(self, arg_placeholder_spec: pyc.AugmentationSpec) -> None:
         self.mutate = False
         self.allow_top_level = False
+        self.check_all_calls = False
         self.placeholder_names: dict[str, None] = {}
         self.arg_placeholder_spec = arg_placeholder_spec
 
@@ -71,9 +76,15 @@ class PlaceholderReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
             self.allow_top_level = old_allow_top_level
 
     def visit_Call(self, node: ast.Call) -> None:
+        if self.check_all_calls:
+            with self.disallow_top_level():
+                self.generic_visit(node)
+            return
         if not isinstance(node.func, ast.BinOp) or not pyc.BaseTracer.get_augmentations(
             id(node.func)
         ):
+            # don't want to disallow top level yet -- if node.func is a call, still want to
+            # be able to visit its args and keywords
             self.visit(node.func)
         if not self.allow_top_level:
             # defer visiting nested calls
@@ -126,15 +137,26 @@ class PlaceholderReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
             id(node)
         )
 
-    def search(self, node: ast.AST | Sequence[ast.AST], allow_top_level: bool) -> bool:
+    def search(
+        self,
+        node: ast.AST | Sequence[ast.AST],
+        allow_top_level: bool,
+        check_all_calls: bool,
+    ) -> bool:
         if isinstance(node, list):
             return any(
-                self.search(inner, allow_top_level=allow_top_level) for inner in node
+                self.search(
+                    inner,
+                    allow_top_level=allow_top_level,
+                    check_all_calls=check_all_calls,
+                )
+                for inner in node
             )
         assert isinstance(node, ast.AST)
         orig_ctr = self.arg_ctr
         try:
             self.allow_top_level = allow_top_level
+            self.check_all_calls = check_all_calls
             self.visit(node)
             found = self.arg_ctr > orig_ctr or len(self.placeholder_names) > 0
         finally:
@@ -142,11 +164,14 @@ class PlaceholderReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
             self.placeholder_names.clear()
         return found
 
-    def rewrite(self, node: ast.expr, allow_top_level: bool) -> list[str]:
+    def rewrite(
+        self, node: ast.expr, allow_top_level: bool, check_all_calls: bool
+    ) -> list[str]:
         old_mutate = self.mutate
         try:
             self.mutate = True
             self.allow_top_level = allow_top_level
+            self.check_all_calls = check_all_calls
             self.visit(node)
             ret = self.placeholder_names
         finally:

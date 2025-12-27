@@ -425,3 +425,7 @@ if sys.version_info >= (3, 8):  # noqa
             assert pyc.eval(
                 "($x, $y, $z) *|> ($y, $z, $x) *|> ($z, $x, $y) <|* (1, 2, 3)"
             ) == (3, 1, 2)
+
+    def test_placeholder_scope_within_pipeline_step():
+        with PipelineTracer:
+            assert pyc.eval("'12' |> list *|> (int($) - 1, int($) + 1)") == (0, 3)

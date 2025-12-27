@@ -21,18 +21,26 @@ from nbpipes.placeholders import PlaceholderReplacer, SingletonArgCounterMixin
 from nbpipes.traceback_patch import frame_to_node_mapping, patch_find_node_ipython
 
 
-def node_is_bitor_op(node: ast.AST | None) -> bool:
-    return (
-        isinstance(node, ast.BinOp)
-        and isinstance(node.op, ast.BitOr)
-        and bool(PipelineTracer.get_augmentations(id(node)))
-    )
+def node_is_bitor_op(
+    node: ast.AST | None,
+    allowlisted_augmentations: set[pyc.AugmentationSpec] | None = None,
+) -> bool:
+    if not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.BitOr):
+        return False
+    augs = PipelineTracer.get_augmentations(id(node))
+    if allowlisted_augmentations is None:
+        return bool(augs)
+    else:
+        return bool(augs & allowlisted_augmentations)
 
 
-def parent_is_bitor_op(node_or_id: ast.expr | int) -> bool:
+def parent_is_bitor_op(
+    node_or_id: ast.expr | int,
+    allowlisted_augmentations: set[pyc.AugmentationSpec] | None = None,
+) -> bool:
     node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
     parent = pyc.BaseTracer.containing_ast_by_id.get(node_id)
-    return node_is_bitor_op(parent)
+    return node_is_bitor_op(parent, allowlisted_augmentations=allowlisted_augmentations)
 
 
 @contextmanager
@@ -246,16 +254,15 @@ class PipelineTracer(pyc.BaseTracer):
         else:
             return ret
 
-    @pyc.register_handler(
-        pyc.before_load_complex_symbol,
-        when=is_outer_or_allowlisted,
-    )
+    @pyc.register_handler(pyc.before_load_complex_symbol, when=is_outer_or_allowlisted)
     def handle_chain_placeholder_rewrites(
         self, ret, node: ast.expr, frame: FrameType, *_, **__
     ):
         with self.lexical_chain_stack.push():
             self.cur_chain_placeholder_lambda = None
-        if not self.placeholder_replacer.search(node, allow_top_level=True):
+        if not self.placeholder_replacer.search(
+            node, allow_top_level=True, check_all_calls=False
+        ):
             return ret
         __hide_pyccolo_frame__ = True
         frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node
@@ -270,12 +277,13 @@ class PipelineTracer(pyc.BaseTracer):
             and not self.placeholder_replacer.search(
                 cast(Sequence[ast.AST], lambda_body.args + lambda_body.keywords),
                 allow_top_level=True,
+                check_all_calls=False,
             )
         ):
             lambda_body_parent_call = lambda_body
             lambda_body = lambda_body.func
         placeholder_names = self.placeholder_replacer.rewrite(
-            lambda_body, allow_top_level=True
+            lambda_body, allow_top_level=True, check_all_calls=False
         )
         ast_lambda = SingletonArgCounterMixin.create_placeholder_lambda(
             placeholder_names, orig_ctr, lambda_body, frame.f_globals
@@ -359,7 +367,7 @@ class PipelineTracer(pyc.BaseTracer):
     ) -> ast.Lambda:
         orig_ctr = self.placeholder_replacer.arg_ctr
         placeholder_names = self.placeholder_replacer.rewrite(
-            node, allow_top_level=allow_top_level
+            node, allow_top_level=allow_top_level, check_all_calls=True
         )
         if associate_lhs:
             node_to_associate = node
@@ -397,7 +405,9 @@ class PipelineTracer(pyc.BaseTracer):
         allow_top_level = not isinstance(node, ast.BinOp) or not self.get_augmentations(
             id(node)
         )
-        if not self.placeholder_replacer.search(node, allow_top_level=allow_top_level):
+        if not self.placeholder_replacer.search(
+            node, allow_top_level=allow_top_level, check_all_calls=True
+        ):
             return ret
         transformed = StatementMapper.bookkeeping_propagating_copy(node)
         ast_lambda = self.transform_pipeline_placeholders(
@@ -409,6 +419,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     def search_left_descendant_placeholder(self, node: ast.BinOp) -> int:
         num_traversals = 0
+        parent: ast.BinOp
         while True:
             if not (
                 self.get_augmentations(id(node))
@@ -429,18 +440,24 @@ class PipelineTracer(pyc.BaseTracer):
                 }
             ):
                 return -1
+            parent = node
             node = node.left  # type: ignore[assignment]
             num_traversals += 1
-            if (
-                not isinstance(node, ast.BinOp)
-                or (
-                    not isinstance(node.op, ast.BitOr)
-                    and not isinstance(node.op, ast.BitXor)
-                )
-                or not self.get_augmentations(id(node))
-            ):
+            if not node_is_bitor_op(node):
                 break
-        if self.placeholder_replacer.search(node, allow_top_level=False):
+        if node_is_bitor_op(
+            parent,
+            allowlisted_augmentations={
+                self.left_compose_op_spec,
+                self.left_compose_tuple_op_spec,
+                self.left_compose_dict_op_spec,
+            },
+        ):
+            # don't create lambdas if the leftmost pipeline op is a composition operator
+            return -1
+        if self.placeholder_replacer.search(
+            node, allow_top_level=False, check_all_calls=True
+        ):
             return num_traversals
         else:
             return -1
