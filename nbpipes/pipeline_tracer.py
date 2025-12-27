@@ -68,6 +68,12 @@ def is_outer_or_allowlisted(node_or_id: ast.AST | int) -> bool:
     return False
 
 
+def is_partial_call(node: ast.Call) -> bool:
+    return PipelineTracer.partial_call_spec in PipelineTracer.get_augmentations(
+        id(node)
+    )
+
+
 def partial_call_currier(func: Callable[..., Any]) -> Callable[..., Any]:
     def make_curried_caller(*curried_args, **curried_kwargs):
         @functools.wraps(func)
@@ -233,7 +239,7 @@ class PipelineTracer(pyc.BaseTracer):
         except ImportError:
             pass
 
-    @pyc.register_handler(pyc.before_call, reentrant=True)
+    @pyc.register_handler(pyc.before_call, when=is_partial_call, reentrant=True)
     def curry_partial_calls(self, ret, node: ast.Call, *_, **__):
         if self.partial_call_spec in self.get_augmentations(id(node)):
             return partial_call_currier(ret)
