@@ -79,7 +79,7 @@ def partial_call_currier(func: Callable[..., Any]) -> Callable[..., Any]:
     return make_curried_caller
 
 
-_skip_binop_args_lambda = lambda: None
+_skip_binop_args_lambda = lambda: None  # noqa: E731
 
 
 class PipelineTracer(pyc.BaseTracer):
@@ -216,7 +216,8 @@ class PipelineTracer(pyc.BaseTracer):
         self.binop_arg_nodes_to_skip: set[int] = set()
         self.binop_nodes_to_eval: set[int] = set()
         self.lexical_chain_stack: pyc.TraceStack = self.make_stack()
-        self.placeholder_arg_position_cache: dict[int, list[str]] = {}
+        with self.register_additional_ast_bookkeeping():
+            self.placeholder_arg_position_cache: dict[int, list[str]] = {}
         self.exc_to_propagate: Exception | None = None
         with self.lexical_chain_stack.register_stack_state():
             self.cur_chain_placeholder_lambda: Callable[..., Any] | None = None
@@ -252,7 +253,7 @@ class PipelineTracer(pyc.BaseTracer):
             return ret
         __hide_pyccolo_frame__ = True
         frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node
-        node_copy = StatementMapper.augmentation_propagating_copy(node)
+        node_copy = StatementMapper.bookkeeping_propagating_copy(node)
         assert isinstance(node_copy, ast.expr)
         orig_ctr = self.placeholder_replacer.arg_ctr
         lambda_body_parent_call = None
@@ -328,8 +329,6 @@ class PipelineTracer(pyc.BaseTracer):
     def reorder_placeholder_names_for_prior_positions(
         self, node: ast.expr, placeholder_names: list[str]
     ) -> list[str]:
-        if not isinstance(node, ast.BinOp):
-            return placeholder_names
         prev_placeholders = self.placeholder_arg_position_cache.get(id(node))
         if prev_placeholders is None:
             return placeholder_names
@@ -350,17 +349,27 @@ class PipelineTracer(pyc.BaseTracer):
         frame_globals: dict[str, Any],
         allow_top_level: bool,
         full_node: ast.expr | None = None,
+        associate_lhs: bool = False,
     ) -> ast.Lambda:
         orig_ctr = self.placeholder_replacer.arg_ctr
         placeholder_names = self.placeholder_replacer.rewrite(
             node, allow_top_level=allow_top_level
         )
-        self.placeholder_arg_position_cache[id(parent)] = [
+        if associate_lhs:
+            node_to_associate = node
+        else:
+            node_to_associate = parent
+        placeholder_names_to_associate = [
             name for name in placeholder_names if not name[1].isdigit()
         ]
-        placeholder_names = self.reorder_placeholder_names_for_prior_positions(
-            parent.left, placeholder_names
-        )
+        if placeholder_names_to_associate:
+            self.placeholder_arg_position_cache[id(node_to_associate)] = [
+                name for name in placeholder_names if not name[1].isdigit()
+            ]
+        if not associate_lhs:
+            placeholder_names = self.reorder_placeholder_names_for_prior_positions(
+                parent.left, placeholder_names
+            )
         return SingletonArgCounterMixin.create_placeholder_lambda(
             placeholder_names, orig_ctr, full_node or node, frame_globals
         )
@@ -384,7 +393,7 @@ class PipelineTracer(pyc.BaseTracer):
         )
         if not self.placeholder_replacer.search(node, allow_top_level=allow_top_level):
             return ret
-        transformed = StatementMapper.augmentation_propagating_copy(node)
+        transformed = StatementMapper.bookkeeping_propagating_copy(node)
         ast_lambda = self.transform_pipeline_placeholders(
             transformed, parent, frame.f_globals, allow_top_level=allow_top_level
         )
@@ -447,7 +456,7 @@ class PipelineTracer(pyc.BaseTracer):
         self.binop_arg_nodes_to_skip.add(id(node.left))
         self.binop_arg_nodes_to_skip.add(id(node.right))
         self.binop_nodes_to_eval.add(id(node))
-        left_arg = transformed = StatementMapper.augmentation_propagating_copy(node)
+        left_arg = transformed = StatementMapper.bookkeeping_propagating_copy(node)
         for _i in range(num_left_traversals_to_lhs_placeholder_node):
             left_arg = left_arg.left  # type: ignore[assignment]
         ast_lambda = self.transform_pipeline_placeholders(
@@ -456,6 +465,7 @@ class PipelineTracer(pyc.BaseTracer):
             frame.f_globals,
             allow_top_level=False,
             full_node=transformed,
+            associate_lhs=True,
         )
         ast_lambda.body = transformed
         evaluated_lambda = pyc.eval(ast_lambda, frame.f_globals, frame.f_locals)

@@ -418,6 +418,10 @@ if sys.version_info >= (3, 8):  # noqa
     def test_placeholder_arg_ordering():
         with PipelineTracer:
             assert pyc.eval("(1, 2, 3) *|> ($x, $y, $z) *|> ($y, $z, $x)") == (2, 3, 1)
-            # TODO: get this one working. Maybe needs a mechanism to propagate arbitrary ast bookkeeping in pyccolo?
-            # assert pyc.eval("($x, $y, $z) *|> ($y, $z, $x) <|* (1, 2, 3)") == (2, 3, 1)
-            assert pyc.eval("(1, 2, 3) *|> ($x, $y, $z) *|> ($y, $z, $x) *|> ($z, $x, $y)") == (3, 1, 2)
+            assert pyc.eval("($x, $y, $z) *|> ($y, $z, $x) <|* (1, 2, 3)") == (2, 3, 1)
+            assert pyc.eval(
+                "(1, 2, 3) *|> ($x, $y, $z) *|> ($y, $z, $x) *|> ($z, $x, $y)"
+            ) == (3, 1, 2)
+            assert pyc.eval(
+                "($x, $y, $z) *|> ($y, $z, $x) *|> ($z, $x, $y) <|* (1, 2, 3)"
+            ) == (3, 1, 2)
