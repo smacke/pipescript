@@ -429,3 +429,73 @@ if sys.version_info >= (3, 8):  # noqa
     def test_placeholder_scope_within_pipeline_step():
         with PipelineTracer:
             assert pyc.eval("'12' |> list *|> (int($) - 1, int($) + 1)") == (0, 3)
+
+    def test_loop_pipelines():
+        with PipelineTracer:
+            try:
+                pyc.exec(
+                    textwrap.dedent(
+                        """
+                        for _ in range(10):
+                            assert 1 |> $ + 1 == 2
+                        """
+                    ).strip("\n")
+                )
+            except Exception:
+                pass
+            else:
+                assert False, "this should have thrown"
+
+            # OK to run this when looped pipelines are allowed
+            pyc.exec(
+                textwrap.dedent(
+                    """
+                    with allow_pipelines_in_loops_and_calls():
+                        for _ in range(10):
+                            assert 1 |> $ + 1 == 2
+                    """
+                ).strip("\n")
+            )
+
+    def test_function_pipelines():
+        with PipelineTracer:
+            try:
+                pyc.exec(
+                    textwrap.dedent(
+                        """
+                        def function_with_pipeline():
+                            return 1 |> $ + 1
+                            
+                        assert function_with_pipeline() == 2
+                        """
+                    ).strip("\n")
+                )
+            except Exception:
+                pass
+            else:
+                assert False, "this should have thrown"
+
+            # OK to run this when functions with pipelines are allowed
+            pyc.exec(
+                textwrap.dedent(
+                    """
+                    @allow_pipelines_in_loops_and_calls
+                    def function_with_pipeline():
+                        return 1 |> $ + 1
+                        
+                    assert function_with_pipeline() == 2
+                    """
+                ).strip("\n")
+            )
+
+            pyc.exec(
+                textwrap.dedent(
+                    """
+                    @allow_pipelines_in_loops_and_calls()
+                    def function_with_pipeline():
+                        return 1 |> $ + 1
+
+                    assert function_with_pipeline() == 2
+                    """
+                ).strip("\n")
+            )

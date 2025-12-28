@@ -8,9 +8,8 @@ from __future__ import annotations
 import ast
 import builtins
 import functools
-from contextlib import contextmanager
 from types import FrameType
-from typing import Any, Callable, Generator, Sequence, cast
+from typing import Any, Callable, Sequence, cast
 
 import pyccolo as pyc
 from pyccolo.examples.optional_chaining import OptionalChainer
@@ -19,6 +18,7 @@ from pyccolo.trace_events import TraceEvent
 
 from nbpipes.placeholders import PlaceholderReplacer, SingletonArgCounterMixin
 from nbpipes.traceback_patch import frame_to_node_mapping, patch_find_node_ipython
+from nbpipes.utils import allow_pipelines_in_loops_and_calls, peek
 
 
 def node_is_bitor_op(
@@ -43,11 +43,6 @@ def parent_is_bitor_op(
     return node_is_bitor_op(parent, allowlisted_augmentations=allowlisted_augmentations)
 
 
-@contextmanager
-def allow_pipelines_in_loops_and_calls() -> Generator[None, None, None]:
-    yield
-
-
 def is_outer_or_allowlisted(node_or_id: ast.AST | int) -> bool:
     node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
     if pyc.is_outer_stmt(node_id):
@@ -66,12 +61,15 @@ def is_outer_or_allowlisted(node_or_id: ast.AST | int) -> bool:
             ):
                 return True
         elif isinstance(parent_stmt, (ast.AsyncFunctionDef, ast.FunctionDef)):
-            if any(
-                isinstance(deco, ast.Name)
-                and deco.id == allow_pipelines_in_loops_and_calls.__name__
-                for deco in parent_stmt.decorator_list
-            ):
-                return True
+            for deco in parent_stmt.decorator_list:
+                if isinstance(deco, ast.Name):
+                    actual_deco = deco
+                elif isinstance(deco, ast.Call):
+                    actual_deco = deco.func
+                else:
+                    continue
+                if actual_deco.id == allow_pipelines_in_loops_and_calls.__name__:
+                    return True
         parent_stmt = pyc.BaseTracer.parent_stmt_by_id.get(id(parent_stmt))
     return False
 
@@ -225,6 +223,8 @@ class PipelineTracer(pyc.BaseTracer):
 
     placeholder_replacer = PlaceholderReplacer(arg_placeholder_spec)
 
+    extra_builtins = [allow_pipelines_in_loops_and_calls, peek]
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.binop_arg_nodes_to_skip: set[int] = set()
@@ -236,16 +236,20 @@ class PipelineTracer(pyc.BaseTracer):
         with self.lexical_chain_stack.register_stack_state():
             self.cur_chain_placeholder_lambda: Callable[..., Any] | None = None
         patch_find_node_ipython()
-        allow_pipelines_name = allow_pipelines_in_loops_and_calls.__name__
-        setattr(builtins, allow_pipelines_name, allow_pipelines_in_loops_and_calls)
+        user_ns: dict[str, Any] | None = None
         try:
             from IPython import get_ipython
 
             shell = get_ipython()
             if shell is not None:
-                shell.user_ns[allow_pipelines_name] = allow_pipelines_in_loops_and_calls
+                user_ns = shell.user_ns
         except ImportError:
             pass
+        for extra_builtin in self.extra_builtins:
+            extra_builtin_name = extra_builtin.__name__
+            setattr(builtins, extra_builtin_name, extra_builtin)
+            if user_ns is not None:
+                user_ns[extra_builtin_name] = extra_builtin
 
     @pyc.register_handler(pyc.before_call, when=is_partial_call, reentrant=True)
     def curry_partial_calls(self, ret, node: ast.Call, *_, **__):
