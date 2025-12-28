@@ -18,7 +18,7 @@ from pyccolo.trace_events import TraceEvent
 
 from nbpipes.placeholders import PlaceholderReplacer, SingletonArgCounterMixin
 from nbpipes.traceback_patch import frame_to_node_mapping, patch_find_node_ipython
-from nbpipes.utils import allow_pipelines_in_loops_and_calls, null, peek
+from nbpipes.utils import allow_pipelines_in_loops_and_calls, get_user_ns, null, peek
 
 
 def node_is_bitor_op(
@@ -236,17 +236,11 @@ class PipelineTracer(pyc.BaseTracer):
         with self.lexical_chain_stack.register_stack_state():
             self.cur_chain_placeholder_lambda: Callable[..., Any] | None = None
         patch_find_node_ipython()
-        user_ns: dict[str, Any] | None = None
-        try:
-            from IPython import get_ipython
-
-            shell = get_ipython()
-            if shell is not None:
-                user_ns = shell.user_ns
-        except ImportError:
-            pass
+        user_ns = get_user_ns()
         for extra_builtin in self.extra_builtins:
             extra_builtin_name = extra_builtin.__name__
+            if hasattr(builtins, extra_builtin_name):
+                continue
             setattr(builtins, extra_builtin_name, extra_builtin)
             if user_ns is not None:
                 user_ns[extra_builtin_name] = extra_builtin

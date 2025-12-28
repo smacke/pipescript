@@ -11,13 +11,13 @@ from types import FrameType
 from typing import Any, cast
 
 import pyccolo as pyc
-from IPython import get_ipython
 from pyccolo import fast
 from pyccolo.stmt_mapper import StatementMapper
 from pyccolo.trace_events import TraceEvent
 
 from nbpipes.pipeline_tracer import PipelineTracer
 from nbpipes.placeholders import SingletonArgCounterMixin
+from nbpipes.utils import get_user_ns
 
 
 class _ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
@@ -79,39 +79,26 @@ class MacroTracer(pyc.BaseTracer):
     allow_reentrant_events = True
     global_guards_enabled = False
 
-    macros = ("f", "filter", "ifilter", "map", "imap", "reduce")
+    macros = {
+        "f": None,
+        "filter": filter,
+        "ifilter": filter,
+        "map": map,
+        "imap": map,
+        "reduce": reduce,
+    }
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._extra_builtins: set[str] = set()
-        self._arg_replacer = _ArgReplacer()
-        builtins.reduce = reduce  # type: ignore[attr-defined]
-        builtins.imap = map  # type: ignore[attr-defined]
-        builtins.ifilter = filter  # type: ignore[attr-defined]
-        shell = get_ipython()
-        if shell is not None:
-            user_ns = shell.user_ns
-            user_ns["reduce"] = reduce
-            user_ns["imap"] = map
-            user_ns["ifilter"] = filter
+        self.arg_replacer = _ArgReplacer()
         self.lambda_cache: dict[tuple[int, int, TraceEvent], Any] = {}
-
-    def enter_tracing_hook(self) -> None:
-        import builtins
-
-        # need to create dummy reference to avoid NameError
-        for macro in self.macros:
-            if not hasattr(builtins, macro):
-                self._extra_builtins.add(macro)
-                setattr(builtins, macro, None)
-
-    def exit_tracing_hook(self) -> None:
-        import builtins
-
-        for macro in self._extra_builtins:
-            if hasattr(builtins, macro):
-                delattr(builtins, macro)
-        self._extra_builtins.clear()
+        user_ns = get_user_ns()
+        for macro_name, macro in self.macros.items():
+            if hasattr(builtins, macro_name):
+                continue
+            setattr(builtins, macro_name, macro)
+            if user_ns is not None:
+                user_ns[macro_name] = macro
 
     class _IdentitySubscript:
         def __getitem__(self, item):
@@ -134,13 +121,13 @@ class MacroTracer(pyc.BaseTracer):
         if cached_lambda is not self._not_found:
             return cached_lambda
         __hide_pyccolo_frame__ = True
-        orig_ctr = self._arg_replacer.arg_ctr
+        orig_ctr = self.arg_replacer.arg_ctr
         orig_lambda_body: ast.expr = node.slice  # type: ignore[assignment]
         if isinstance(orig_lambda_body, ast.Index):
             orig_lambda_body = orig_lambda_body.value  # type: ignore[attr-defined]
         lambda_body = StatementMapper.bookkeeping_propagating_copy(orig_lambda_body)
-        placeholder_names = self._arg_replacer.get_placeholder_names(lambda_body)
-        if self._arg_replacer.arg_ctr == orig_ctr and len(placeholder_names) == 0:
+        placeholder_names = self.arg_replacer.get_placeholder_names(lambda_body)
+        if self.arg_replacer.arg_ctr == orig_ctr and len(placeholder_names) == 0:
             ast_lambda = lambda_body
         else:
             ast_lambda = SingletonArgCounterMixin.create_placeholder_lambda(
@@ -150,10 +137,10 @@ class MacroTracer(pyc.BaseTracer):
         func = cast(ast.Name, node.value).id
         if func in ("filter", "ifilter", "map", "imap", "reduce"):
             with fast.location_of(ast_lambda):
-                arg = f"_{self._arg_replacer.arg_ctr}"
-                self._arg_replacer.arg_ctr += 1
-                starred_arg = f"_{self._arg_replacer.arg_ctr}"
-                self._arg_replacer.arg_ctr += 1
+                arg = f"_{self.arg_replacer.arg_ctr}"
+                self.arg_replacer.arg_ctr += 1
+                starred_arg = f"_{self.arg_replacer.arg_ctr}"
+                self.arg_replacer.arg_ctr += 1
                 inner_func = func
                 if func == "ifilter":
                     inner_func = "filter"
@@ -169,8 +156,8 @@ class MacroTracer(pyc.BaseTracer):
                 )
                 functor_lambda_body.args[0] = ast_lambda
                 if func in ("filter", "map"):
-                    id_arg = f"_{self._arg_replacer.arg_ctr}"
-                    self._arg_replacer.arg_ctr += 1
+                    id_arg = f"_{self.arg_replacer.arg_ctr}"
+                    self.arg_replacer.arg_ctr += 1
                     lambda_body_str = f"(list if type({arg}) is list else lambda {id_arg}: {id_arg})(None)"
                     functor_lambda_outer_body = cast(
                         ast.Call,

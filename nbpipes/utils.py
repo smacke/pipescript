@@ -1,13 +1,25 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import TypeVar
+from typing import Any, TypeVar
 
 T = TypeVar("T")
 
 
 # allow-listed print function that won't cause the no-prints check to fail
 print_ = print
+
+
+def get_user_ns() -> dict[str, Any] | None:
+    try:
+        from IPython import get_ipython
+
+        shell = get_ipython()
+        if shell is not None:
+            return shell.user_ns
+    except ImportError:
+        pass
+    return None
 
 
 def allow_pipelines_in_loops_and_calls(func=None):
