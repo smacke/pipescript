@@ -12,6 +12,7 @@ print_ = print
 
 def allow_pipelines_in_loops_and_calls(func=None):
     if func is None or not callable(func):
+
         @contextmanager
         def nothing():
             yield
@@ -19,6 +20,10 @@ def allow_pipelines_in_loops_and_calls(func=None):
         return nothing()
     else:
         return func
+
+
+def null(*_, **__) -> None:
+    return None
 
 
 def peek(obj: T, *args, **kwargs) -> T:

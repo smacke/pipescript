@@ -18,7 +18,7 @@ from pyccolo.trace_events import TraceEvent
 
 from nbpipes.placeholders import PlaceholderReplacer, SingletonArgCounterMixin
 from nbpipes.traceback_patch import frame_to_node_mapping, patch_find_node_ipython
-from nbpipes.utils import allow_pipelines_in_loops_and_calls, peek
+from nbpipes.utils import allow_pipelines_in_loops_and_calls, null, peek
 
 
 def node_is_bitor_op(
@@ -64,7 +64,7 @@ def is_outer_or_allowlisted(node_or_id: ast.AST | int) -> bool:
             for deco in parent_stmt.decorator_list:
                 if isinstance(deco, ast.Name):
                     actual_deco = deco
-                elif isinstance(deco, ast.Call):
+                elif isinstance(deco, ast.Call) and isinstance(deco.func, ast.Name):
                     actual_deco = deco.func
                 else:
                     continue
@@ -223,7 +223,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     placeholder_replacer = PlaceholderReplacer(arg_placeholder_spec)
 
-    extra_builtins = [allow_pipelines_in_loops_and_calls, peek]
+    extra_builtins = [allow_pipelines_in_loops_and_calls, null, peek]
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
