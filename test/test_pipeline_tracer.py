@@ -499,3 +499,13 @@ if sys.version_info >= (3, 8):  # noqa
                     """
                 ).strip("\n")
             )
+
+    def test_do():
+        with PipelineTracer:
+            with MacroTracer:
+                assert pyc.eval("[0, 1, 2] |>> lst |> do[$.append(42)]") == [
+                    0,
+                    1,
+                    2,
+                    42,
+                ]

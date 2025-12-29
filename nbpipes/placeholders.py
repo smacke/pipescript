@@ -96,12 +96,9 @@ class PlaceholderReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
                 self.visit(kw.value)
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
-        from pyccolo.examples.quick_lambda import QuickLambdaTracer
+        from nbpipes.macro_tracer import MacroTracer
 
-        if (
-            isinstance(node.value, ast.Name)
-            and node.value.id in QuickLambdaTracer.lambda_macros
-        ):
+        if isinstance(node.value, ast.Name) and node.value.id in MacroTracer.macros:
             # defer visiting nested quick lambdas
             return
         self.generic_visit(node)

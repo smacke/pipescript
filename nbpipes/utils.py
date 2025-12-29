@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, TypeVar
+from typing import Any, Callable, TypeVar
 
 T = TypeVar("T")
 
@@ -40,4 +40,10 @@ def null(*_, **__) -> None:
 
 def peek(obj: T, *args, **kwargs) -> T:
     print_(obj, *args, **kwargs)
+    return obj
+
+
+# Like functoolz `do`
+def do(func: Callable[[T], Any], obj: T) -> T:
+    func(obj)
     return obj

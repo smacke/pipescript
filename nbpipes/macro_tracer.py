@@ -17,7 +17,7 @@ from pyccolo.trace_events import TraceEvent
 
 from nbpipes.pipeline_tracer import PipelineTracer
 from nbpipes.placeholders import SingletonArgCounterMixin
-from nbpipes.utils import get_user_ns
+from nbpipes.utils import do, get_user_ns
 
 
 class _ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
@@ -80,6 +80,7 @@ class MacroTracer(pyc.BaseTracer):
     global_guards_enabled = False
 
     macros = {
+        "do": do,
         "f": None,
         "filter": filter,
         "ifilter": filter,
@@ -123,8 +124,6 @@ class MacroTracer(pyc.BaseTracer):
         __hide_pyccolo_frame__ = True
         orig_ctr = self.arg_replacer.arg_ctr
         orig_lambda_body: ast.expr = node.slice  # type: ignore[assignment]
-        if isinstance(orig_lambda_body, ast.Index):
-            orig_lambda_body = orig_lambda_body.value  # type: ignore[attr-defined]
         lambda_body = StatementMapper.bookkeeping_propagating_copy(orig_lambda_body)
         placeholder_names = self.arg_replacer.get_placeholder_names(lambda_body)
         if self.arg_replacer.arg_ctr == orig_ctr and len(placeholder_names) == 0:
@@ -135,7 +134,7 @@ class MacroTracer(pyc.BaseTracer):
             )
             ast_lambda.body = lambda_body
         func = cast(ast.Name, node.value).id
-        if func in ("filter", "ifilter", "map", "imap", "reduce"):
+        if func in self.macros and func != "f":
             with fast.location_of(ast_lambda):
                 arg = f"_{self.arg_replacer.arg_ctr}"
                 self.arg_replacer.arg_ctr += 1
