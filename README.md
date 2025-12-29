@@ -7,21 +7,32 @@ nbpipes
 [![Python Versions](https://img.shields.io/pypi/pyversions/nbpipes.svg)](https://pypi.org/project/nbpipes)
 [![PyPI Version](https://img.shields.io/pypi/v/nbpipes.svg)](https://pypi.org/project/nbpipes)
 
-nbpipes is an IPython extension that brings a pipeline operator `|>` and
-powerful placeholder syntax to IPython and Jupyter. If you're familiar with
-the [magrittr](https://magrittr.tidyverse.org/) package for R, then you'll
-be right  at home with nbpipes.
+nbpipes is an IPython extension that brings a pipe operator `|>` and
+powerful placeholder syntax extensions to IPython and Jupyter. It is:
+- Just a library you can install from PyPI, compatible with a wide range of Python 3
+  versions -- no fancy installation instructions, no complicated language distributions
+  to install
+- Intended for Jupyter notebooks, for the IPython REPL, or for any interactive
+  Python environment built on top of IPython
+- Fully compatible with all existing Python standard and third-party libraries that
+  you already know and love
+
+If you're familiar with the [magrittr](https://magrittr.tidyverse.org/) package
+for R, then you'll be right  at home with nbpipes.
 
 
 ## Getting Started
 
-Run the following in IPython or Jupyter to install nbpipes and  load
+Run the following in IPython or Jupyter to install nbpipes and load
 the extension:
 
 ```python
 %pip install nbpipes
 %load_ext nbpipes
 ```
+
+The `%load_ext nbpipes` invocation is what enables the new pipe syntax
+in your current session.
 
 ## Features by Example
 
@@ -31,7 +42,7 @@ Let's look at a few examples to give a flavor of what you can do with nbpipes:
 # Display a sorted version of a tuple
 >>> tup = (3, 4, 1, 5, 6)
 >>> tup |> sorted |> tuple
-(6, 5, 4, 3, 1)
+(1, 3, 4, 5, 6)
 ```
 The above example showcases the `|>`, or "pipe", operator, which is a much-loved
 feature of functional programming that has become increasingly mainstream. Its
@@ -43,13 +54,13 @@ interactive programming environments like Jupyter. With `|>`, this type of
 incremental verification becomes a breeze: first execute `tup |> sorted`, then
 append ` |> tuple` to execute the full chain `tup |> sorted |> tuple`, each time
 using the last-expression rendering capabilities of the notebook or REPL to
-inspect the result.
+inspect and verify the result.
 
 ### Placeholders
 
 The power of the `|>` operator is amplified via placeholder syntax for implicit
 lambda construction: for nbpipes, we use `$` to stand in for function arguments
-induce lambda creation:
+and induce function creation:
 
 ```python
 # Sort a list in reverse order
@@ -87,6 +98,15 @@ print(sorter(lst, reverse))
 lst |> sorter($, reverse) |> print
 ```
 
+Placeholders can appear anywhere -- not just as arguments to function calls:
+
+```python
+# Sort a list and find the position of element 4:
+>>> lst = [3, 4, 1, 5, 6]
+>>> lst |> sorted |> $.index(4)
+3
+```
+
 ### Named Placeholders
 
 There are situations that would benefit from referencing the same placeholder multiple times, for which
@@ -94,19 +114,21 @@ nbpipes permits *named placeholders* by prefixing `$` to an identifier:
 
 ```python
 # Pair even entries from a range with their adjacent odd entry
-range(6) |> list |> zip($lst[::2], $lst[1::2]) |> list
+range(6) |> list |> zip($v[::2], $v[1::2]) |> list
 >>> [(0, 1), (2, 3), (4, 5)]
 ```
 
-In the above example, we could have used any name for `$lst`, the important
+In the above example, we could have used any name for `$v`, the important
 thing is that the same name was used -- otherwise nbpipes would have
-induced a lambda with two arguments instead of one.
+induced a function with two arguments instead of one.
 
 ### Undetermined Pipelines
 
 ### Curry Syntax
 
 ### Macros
+
+### Additional Operators
 
 ## Placeholder Scope
 
@@ -142,7 +164,7 @@ is a sequence that it sorts using the second element of each value in said
 sequence value as sort key. In most cases, `sorter2` probably gives the desired
 behavior.
 
-## Additional Operators
+## Error Experience
 
 ## More Examples
 I developed nbpipes while working on
@@ -152,19 +174,19 @@ which you can find [here](https://github.com/smacke/aoc2025).
 
 ## What nbpipes is and is not
 
-nbpipes is not a general purpose functional programming extension to Python. It
-is very much not intended for production use cases, and instead caters toward
-quick-and-dirty one-off / scratchpad type computations in IPython and Jupyter
-specifically. In short, nbpipes aims to provide simple but powerful pipeline and
-placeholder syntax to interactive Python programming environments.
+nbpipes is not a general purpose functional programming language on top of
+Python. It is very much not intended for production use cases, and instead
+caters toward quick-and-dirty one-off / scratchpad type computations in IPython
+and Jupyter specifically. In short, nbpipes aims to provide simple but powerful
+pipeline and placeholder syntax to interactive Python programming environments.
 
 All the different pipeline operators like `|>`, `<|`, `*|>`, etc. essentially
-transpile down to the bitwise-or (`|`) operator, and therefore every operator
-left-associates at the same level of precdence, meaning that pipeline steps run
-from left to right in the order that they appear. nbpipes aims to optimize for
-simplicity, readability / writability, and predictability over feature
-completeness (though I'd like to think it strikes a fairly good balance in this
-regard).
+transpile down to an instrumented variant of the bitwise-or (`|`) operator, and
+therefore every operator left-associates at the same level of precedence, meaning
+that pipeline steps run from left to right in the order that they appear.
+nbpipes aims to optimize for simplicity, readability / writability, and
+predictability over feature completeness (though I'd like to think it strikes a
+fairly good balance in this regard).
 
 ## How it works
 
@@ -173,8 +195,8 @@ regard).
 nbpipes draws inspiration largely from
 [magrittr](https://magrittr.tidyverse.org/), but also from efforts like
 [coconut](https://coconut-lang.org/) (a functional superset of Python),
-as well as from posts like [this one]() which attempt to fill Python's
-pipe gap with operator overloading hacks.
+as well as from libraries like [Pipe](https://github.com/JulienPalard/Pipe) which
+take a different approach to fill Python's pipe gap with operator overloading hacks.
 
 ## License
 Code in this project licensed under the [BSD-3-Clause License](https://opensource.org/licenses/BSD-3-Clause).
