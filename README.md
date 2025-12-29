@@ -10,7 +10,7 @@ nbpipes
 nbpipes is an IPython extension that brings a pipe operator `|>` and
 powerful placeholder syntax extensions to IPython and Jupyter. It is:
 - Just a library you can install from PyPI, compatible with a wide range of Python 3
-  versions -- no fancy installation instructions, no complicated language distributions
+  versions -- no fancy installation instructions, no complicated language distribution
   to install
 - Intended for Jupyter notebooks, for the IPython REPL, or for any interactive
   Python environment built on top of IPython
@@ -103,8 +103,8 @@ Placeholders can appear anywhere -- not just as arguments to function calls:
 ```python
 # Sort a list and find the position of element 4:
 >>> lst = [3, 4, 1, 5, 6]
->>> lst |> sorted |> $.index(4)
-3
+>>> lst |> sorted |> $.index(3)
+1
 ```
 
 ### Named Placeholders
@@ -124,9 +124,18 @@ induced a function with two arguments instead of one.
 
 ### Undetermined Pipelines
 
-### Curry Syntax
+Similar to magrittr's behavior, if any number of placeholders appear in the first
+step of an nbpipes pipeline, this *undetermined pipeline* will represent a function:
 
-### Macros
+```python
+>>> second_largest_value = $ |> sorted($, reverse=True) |> $[1]
+>>> [3, 8, 1, 5, 6] |> second_largest_value
+6
+```
+
+### Macros and Curry Syntax
+
+### Helper Utilities
 
 ### Additional Operators
 
@@ -136,10 +145,10 @@ A natural question is: how does nbpipes know what part of the code should
 be included in the body of the function induced by placeholder use? The
 rules are as follows:
 
-1. If there is an enclosing macro or pipeline step, the function body
-   includes the "smallest" such enclosing macro or pipeline step.
+1. If there is a macro or pipeline step enclosing the placeholder, the induced
+   function body includes the "smallest" such enclosing macro or pipeline step.
 2. Otherwise, the function body expands to include the nearest "chain"
-   of attributes, subscripts, and / or function calls.
+   of function calls, attribute accesses, and / or subscript accesses.
 
 An example of a "chain" would be something like `np.array($).T.astype(int)`,
 which induces a lambda that converts its argument to a numpy array,
@@ -164,13 +173,13 @@ is a sequence that it sorts using the second element of each value in said
 sequence value as sort key. In most cases, `sorter2` probably gives the desired
 behavior.
 
-## Error Experience
+## Performance Overhead
 
 ## More Examples
 I developed nbpipes while working on
 [Advent of Code 2025](https://adventofcode.com/2025) in parallel,
 and used it for most of the input processesing portions of my solutions,
-which you can find [here](https://github.com/smacke/aoc2025).
+which you can find at https://github.com/smacke/aoc2025.
 
 ## What nbpipes is and is not
 
@@ -182,9 +191,9 @@ pipeline and placeholder syntax to interactive Python programming environments.
 
 All the different pipeline operators like `|>`, `<|`, `*|>`, etc. essentially
 transpile down to an instrumented variant of the bitwise-or (`|`) operator, and
-therefore every operator left-associates at the same level of precedence, meaning
-that pipeline steps run from left to right in the order that they appear.
-nbpipes aims to optimize for simplicity, readability / writability, and
+therefore every new operator left-associates at the same level of precedence,
+meaning that pipeline steps run from left to right in the order that they
+appear. nbpipes aims to optimize for simplicity, readability / writability, and
 predictability over feature completeness (though I'd like to think it strikes a
 fairly good balance in this regard).
 
