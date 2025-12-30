@@ -150,9 +150,7 @@ class MacroTracer(pyc.BaseTracer):
         if func in ("filter", "map"):
             id_arg = f"_{self.arg_replacer.arg_ctr}"
             self.arg_replacer.arg_ctr += 1
-            lambda_body_str = (
-                f"(list if type({arg}) is list else lambda {id_arg}: {id_arg})(None)"
-            )
+            lambda_body_str = f"(type({arg}) if type({arg}) in (frozenset, list, set, tuple) else lambda {id_arg}: {id_arg})(None)"
             functor_lambda_outer_body = cast(
                 ast.Call,
                 cast(

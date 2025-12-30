@@ -517,3 +517,18 @@ if sys.version_info >= (3, 8):  # noqa
                 assert pyc.eval("fork[$+1, $+2](0)") == (1, 2)
                 assert pyc.eval("0 |> fork[$|>$+1, $|>$+2]") == (1, 2)
                 assert pyc.eval("fork[$|>$+1, $|>$+2](0)") == (1, 2)
+
+    def test_map_frozenset_list_set_tuple_eagerness():
+        with PipelineTracer:
+            with MacroTracer:
+                assert pyc.eval("[1, 2, 3] |> map[$ + 1]") == [2, 3, 4]
+                assert pyc.eval("(1, 2, 3) |> map[$ + 1]") == (2, 3, 4)
+                assert pyc.eval("{1, 2, 3} |> map[$ + 1]") == {2, 3, 4}
+                assert pyc.eval("{1, 2, 3} |> frozenset |> map[$ + 1]") == frozenset(
+                    {2, 3, 4}
+                )
+                assert (
+                    pyc.eval("{1: 1, 2: 2, 3: 3} |> map[$ + 1] |> isinstance($, dict)")
+                    is False
+                )
+                assert pyc.eval("{1: 1, 2: 2, 3: 3} |> map[$ + 1] |> list") == [2, 3, 4]
