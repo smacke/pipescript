@@ -15,7 +15,7 @@ from pyccolo import fast
 from pyccolo.stmt_mapper import StatementMapper
 from pyccolo.trace_events import TraceEvent
 
-from nbpipes.api import do, fork, when
+from nbpipes.api import do, fork, future, parallel, when
 from nbpipes.pipeline_tracer import PipelineTracer
 from nbpipes.placeholders import SingletonArgCounterMixin
 from nbpipes.utils import get_user_ns
@@ -94,10 +94,12 @@ class MacroTracer(pyc.BaseTracer):
         do.__name__: do,
         "f": None,
         fork.__name__: fork,
+        future.__name__: future,
         filter.__name__: filter,
         "ifilter": filter,
         map.__name__: map,
         "imap": map,
+        parallel.__name__: parallel,
         reduce.__name__: reduce,
         when.__name__: when,
     }
@@ -202,7 +204,9 @@ class MacroTracer(pyc.BaseTracer):
         __hide_pyccolo_frame__ = True
         func = cast(ast.Name, node.value).id
         callable_expr: ast.expr
-        if func == fork.__name__ and isinstance(node.slice, ast.Tuple):
+        if func in (fork.__name__, parallel.__name__) and isinstance(
+            node.slice, ast.Tuple
+        ):
             callables: list[ast.expr] = []
             max_nargs = 1
             for expr in node.slice.elts:

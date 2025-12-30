@@ -550,3 +550,17 @@ if sys.version_info >= (3, 8):  # noqa
                     )
                     == 42
                 )
+
+    def test_future():
+        with PipelineTracer:
+            with MacroTracer:
+                assert pyc.eval("1 |> future[$ + 1] |> $.result()") == 2
+                assert pyc.eval("[1, 2, 3] |> future[sum] |> $.result()") == 6
+
+    def test_parallel():
+        with PipelineTracer:
+            with MacroTracer:
+                assert pyc.eval("[1, 2, 3, 4] |> parallel[sum, reduce[$*$]]") == (
+                    10,
+                    24,
+                )

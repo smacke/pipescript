@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import Any, Callable, TypeVar
 
 from nbpipes.constants import pipeline_null
 
 T = TypeVar("T")
+R = TypeVar("R")
 
 
 # allow-listed print function that won't cause the no-prints check to fail
@@ -66,3 +68,18 @@ def collapse(results: tuple[T | None, ...]) -> T:
         )
     else:
         return filtered_results[0]
+
+
+def future(func: Callable[[T], R], obj: T) -> Future[R]:
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(func, obj)
+
+
+# Call multiple functions on an input in parallel aggregate the results into a tuple bulk-synchronously
+# Basically a parallel version of fork
+def parallel(funcs: tuple[Callable[[T], Any]], obj: T) -> tuple[Any]:
+    futures = []
+    with ThreadPoolExecutor(max_workers=len(funcs)) as executor:
+        for func in funcs:
+            futures.append(executor.submit(func, obj))
+    return tuple(fut.result() for fut in futures)
