@@ -710,7 +710,7 @@ class PipelineTracer(pyc.BaseTracer):
                 def __composed(*args, **kwargs):
                     g_result = __hide_pyccolo_frame__ and g(*args, **kwargs)
                     return (
-                        __hide_pyccolo_frame__ and None
+                        __hide_pyccolo_frame__ and pipeline_null
                         if g_result is pipeline_null
                         else f(g_result)
                     )
@@ -727,7 +727,7 @@ class PipelineTracer(pyc.BaseTracer):
                 def __tuple_composed(*args, **kwargs):
                     g_result = __hide_pyccolo_frame__ and g(*args, **kwargs)
                     return (
-                        __hide_pyccolo_frame__ and None
+                        __hide_pyccolo_frame__ and pipeline_null
                         if g_result is pipeline_null
                         else f(*g_result)
                     )
@@ -744,7 +744,7 @@ class PipelineTracer(pyc.BaseTracer):
                 def __tuple_composed(*args, **kwargs):
                     g_result = __hide_pyccolo_frame__ and g(*args, **kwargs)
                     return (
-                        __hide_pyccolo_frame__ and None
+                        __hide_pyccolo_frame__ and pipeline_null
                         if g_result is pipeline_null
                         else f(**g_result)
                     )
@@ -758,7 +758,7 @@ class PipelineTracer(pyc.BaseTracer):
                 def __composed(*args, **kwargs):
                     f_result = __hide_pyccolo_frame__ and f(*args, **kwargs)
                     return (
-                        __hide_pyccolo_frame__ and None
+                        __hide_pyccolo_frame__ and pipeline_null
                         if f_result is pipeline_null
                         else g(f_result)
                     )
@@ -772,7 +772,7 @@ class PipelineTracer(pyc.BaseTracer):
                 def __tuple_composed(*args, **kwargs):
                     f_result = __hide_pyccolo_frame__ and f(*args, **kwargs)
                     return (
-                        __hide_pyccolo_frame__ and None
+                        __hide_pyccolo_frame__ and pipeline_null
                         if f_result is pipeline_null
                         else g(*f_result)
                     )
@@ -786,7 +786,7 @@ class PipelineTracer(pyc.BaseTracer):
                 def __tuple_composed(*args, **kwargs):
                     f_result = __hide_pyccolo_frame__ and f(*args, **kwargs)
                     return (
-                        __hide_pyccolo_frame__ and None
+                        __hide_pyccolo_frame__ and pipeline_null
                         if f_result is pipeline_null
                         else g(**f_result)
                     )

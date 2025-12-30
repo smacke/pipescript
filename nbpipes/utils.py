@@ -70,8 +70,9 @@ def when(func: Callable[[T], bool], obj: T) -> T:
 def collapse(results: tuple[T | None, ...]) -> T:
     filtered_results: list[T] = []
     for result in results:
-        if result is not None:
-            filtered_results.append(result)
+        if result is None or result is pipeline_null:
+            continue
+        filtered_results.append(result)
     if len(filtered_results) != 1:
         raise ValueError(
             "Expected exactly one non-None result, got %d" % len(filtered_results)
