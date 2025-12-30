@@ -74,7 +74,7 @@ def collapse(results: tuple[T | None, ...]) -> T:
             filtered_results.append(result)
     if len(filtered_results) != 1:
         raise ValueError(
-            "Expected exactly one non-None result, got {}".format(len(filtered_results))
+            "Expected exactly one non-None result, got %d" % len(filtered_results)
         )
     else:
         return filtered_results[0]
