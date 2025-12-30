@@ -256,11 +256,23 @@ class PipelineTracer(pyc.BaseTracer):
     def handle_chain_placeholder_rewrites(
         self, ret, node: ast.expr, frame: FrameType, *_, **__
     ):
+        from nbpipes.macro_tracer import MacroTracer
+
         with self.lexical_chain_stack.push():
             self.cur_chain_placeholder_lambda = None
         if not self.placeholder_replacer.search(
             node, allow_top_level=True, check_all_calls=False
         ):
+            return ret
+        elif (
+            MacroTracer.initialized()
+            and id(node) in MacroTracer.instance().placeholder_inference_skip_nodes
+        ):
+            # TODO: this is kinda hacky. Normally we would skip this handler because the
+            #   placeholder replacer would short circuit when it sees a macro
+            #   boundary, but in this case, we're already past the macro boundary.
+            #   Ideally we would have a more robust way to tell that we're already
+            #   inside a macro instead of relying on this allowlist mechanism.
             return ret
         __hide_pyccolo_frame__ = True
         frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node
@@ -415,26 +427,27 @@ class PipelineTracer(pyc.BaseTracer):
         evaluated_lambda = pyc.eval(ast_lambda, frame.f_globals, frame.f_locals)
         return lambda: __hide_pyccolo_frame__ and evaluated_lambda
 
-    def search_left_descendant_placeholder(self, node: ast.BinOp) -> int:
+    @classmethod
+    def search_left_descendant_placeholder(cls, node: ast.BinOp) -> int:
         num_traversals = 0
         parent: ast.BinOp
         while True:
             if not (
-                self.get_augmentations(id(node))
+                cls.get_augmentations(id(node))
                 & {
-                    self.pipeline_op_spec,
-                    self.pipeline_tuple_op_spec,
-                    self.pipeline_dict_op_spec,
-                    self.pipeline_op_assign_spec,
-                    self.nullpipe_op_spec,
-                    self.nullpipe_tuple_op_spec,
-                    self.nullpipe_dict_op_spec,
-                    self.value_first_left_partial_apply_op_spec,
-                    self.value_first_left_partial_apply_tuple_op_spec,
-                    self.value_first_left_partial_apply_dict_op_spec,
-                    self.left_compose_op_spec,
-                    self.left_compose_tuple_op_spec,
-                    self.left_compose_dict_op_spec,
+                    cls.pipeline_op_spec,
+                    cls.pipeline_tuple_op_spec,
+                    cls.pipeline_dict_op_spec,
+                    cls.pipeline_op_assign_spec,
+                    cls.nullpipe_op_spec,
+                    cls.nullpipe_tuple_op_spec,
+                    cls.nullpipe_dict_op_spec,
+                    cls.value_first_left_partial_apply_op_spec,
+                    cls.value_first_left_partial_apply_tuple_op_spec,
+                    cls.value_first_left_partial_apply_dict_op_spec,
+                    cls.left_compose_op_spec,
+                    cls.left_compose_tuple_op_spec,
+                    cls.left_compose_dict_op_spec,
                 }
             ):
                 return -1
@@ -446,14 +459,14 @@ class PipelineTracer(pyc.BaseTracer):
         if node_is_bitor_op(
             parent,
             allowlisted_augmentations={
-                self.left_compose_op_spec,
-                self.left_compose_tuple_op_spec,
-                self.left_compose_dict_op_spec,
+                cls.left_compose_op_spec,
+                cls.left_compose_tuple_op_spec,
+                cls.left_compose_dict_op_spec,
             },
         ):
             # don't create lambdas if the leftmost pipeline op is a composition operator
             return -1
-        if self.placeholder_replacer.search(
+        if cls.placeholder_replacer.search(
             node, allow_top_level=False, check_all_calls=True
         ):
             return num_traversals

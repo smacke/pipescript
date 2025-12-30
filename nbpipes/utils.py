@@ -47,3 +47,11 @@ def peek(obj: T, *args, **kwargs) -> T:
 def do(func: Callable[[T], Any], obj: T) -> T:
     func(obj)
     return obj
+
+
+# Call multiple functions on an input and aggregate the results into a tuple
+def fork(funcs: tuple[Callable[[T], Any]], obj: T) -> tuple[Any]:
+    results = []
+    for func in funcs:
+        results.append(func(obj))
+    return tuple(results)

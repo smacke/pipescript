@@ -509,3 +509,11 @@ if sys.version_info >= (3, 8):  # noqa
                     2,
                     42,
                 ]
+
+    def test_fork():
+        with PipelineTracer:
+            with MacroTracer:
+                assert pyc.eval("0 |> fork[$+1, $+2]") == (1, 2)
+                assert pyc.eval("fork[$+1, $+2](0)") == (1, 2)
+                assert pyc.eval("0 |> fork[$|>$+1, $|>$+2]") == (1, 2)
+                assert pyc.eval("fork[$|>$+1, $|>$+2](0)") == (1, 2)
