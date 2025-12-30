@@ -1,0 +1,68 @@
+from __future__ import annotations
+
+from contextlib import contextmanager
+from typing import Any, Callable, TypeVar
+
+from nbpipes.constants import pipeline_null
+
+T = TypeVar("T")
+
+
+# allow-listed print function that won't cause the no-prints check to fail
+print_ = print
+
+
+def allow_pipelines_in_loops_and_calls(func=None):
+    if func is None or not callable(func):
+
+        @contextmanager
+        def nothing():
+            yield
+
+        return nothing()
+    else:
+        return func
+
+
+def null(*_, **__) -> None:
+    return None
+
+
+def peek(obj: T, *args, **kwargs) -> T:
+    print_(obj, *args, **kwargs)
+    return obj
+
+
+# Like functoolz `do`
+def do(func: Callable[[T], Any], obj: T) -> T:
+    func(obj)
+    return obj
+
+
+# Call multiple functions on an input and aggregate the results into a tuple
+def fork(funcs: tuple[Callable[[T], Any]], obj: T) -> tuple[Any]:
+    results = []
+    for func in funcs:
+        results.append(func(obj))
+    return tuple(results)
+
+
+def when(func: Callable[[T], bool], obj: T) -> T:
+    if func(obj):
+        return obj
+    else:
+        return pipeline_null  # type: ignore[return-value]
+
+
+def collapse(results: tuple[T | None, ...]) -> T:
+    filtered_results: list[T] = []
+    for result in results:
+        if result is None or result is pipeline_null:
+            continue
+        filtered_results.append(result)
+    if len(filtered_results) != 1:
+        raise ValueError(
+            "Expected exactly one non-None result, got %d" % len(filtered_results)
+        )
+    else:
+        return filtered_results[0]

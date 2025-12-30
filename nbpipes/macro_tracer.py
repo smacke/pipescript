@@ -15,9 +15,10 @@ from pyccolo import fast
 from pyccolo.stmt_mapper import StatementMapper
 from pyccolo.trace_events import TraceEvent
 
+from nbpipes.api import do, fork, when
 from nbpipes.pipeline_tracer import PipelineTracer
 from nbpipes.placeholders import SingletonArgCounterMixin
-from nbpipes.utils import do, fork, get_user_ns, when
+from nbpipes.utils import get_user_ns
 
 
 class _ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):

@@ -16,16 +16,11 @@ from pyccolo.examples.optional_chaining import OptionalChainer
 from pyccolo.stmt_mapper import StatementMapper
 from pyccolo.trace_events import TraceEvent
 
+from nbpipes.api import allow_pipelines_in_loops_and_calls, collapse, null, peek
+from nbpipes.constants import pipeline_null
 from nbpipes.placeholders import PlaceholderReplacer, SingletonArgCounterMixin
 from nbpipes.traceback_patch import frame_to_node_mapping, patch_find_node_ipython
-from nbpipes.utils import (
-    allow_pipelines_in_loops_and_calls,
-    collapse,
-    get_user_ns,
-    null,
-    peek,
-    pipeline_null,
-)
+from nbpipes.utils import get_user_ns
 
 
 def node_is_bitor_op(
