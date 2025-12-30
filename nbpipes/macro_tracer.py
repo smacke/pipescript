@@ -128,7 +128,7 @@ class MacroTracer(pyc.BaseTracer):
     _not_found = object()
 
     def _transform_ast_lambda_for_macro(
-        self, ast_lambda: ast.Lambda, func: str
+        self, ast_lambda: ast.expr, func: str
     ) -> ast.Lambda:
         arg = f"_{self.arg_replacer.arg_ctr}"
         self.arg_replacer.arg_ctr += 1
@@ -173,7 +173,7 @@ class MacroTracer(pyc.BaseTracer):
 
     def _handle_macro_impl(
         self, orig_lambda_body: ast.expr, frame: FrameType, func: str
-    ) -> ast.Lambda:
+    ) -> ast.expr:
         __hide_pyccolo_frame__ = True  # noqa: F841
         orig_ctr = self.arg_replacer.arg_ctr
         lambda_body = StatementMapper.bookkeeping_propagating_copy(orig_lambda_body)
@@ -200,12 +200,13 @@ class MacroTracer(pyc.BaseTracer):
             return cached_lambda
         __hide_pyccolo_frame__ = True
         func = cast(ast.Name, node.value).id
+        callable_expr: ast.expr
         if func == fork.__name__ and isinstance(node.slice, ast.Tuple):
-            lambdas: list[ast.Lambda] = []
+            callables: list[ast.expr] = []
             max_nargs = 1
             for expr in node.slice.elts:
                 expr_lambda = self._handle_macro_impl(expr, frame, "f")
-                lambdas.append(expr_lambda)
+                callables.append(expr_lambda)
                 if isinstance(expr_lambda, ast.Lambda):
                     max_nargs = max(max_nargs, len(expr_lambda.args.args))
             with fast.location_of(node.slice):
@@ -217,10 +218,13 @@ class MacroTracer(pyc.BaseTracer):
                 ]
                 arg_str = ", ".join(args)
                 self.arg_replacer.arg_ctr += max_nargs
-                ast_lambda = fast.parse(f"lambda {arg_str}: None").body[0].value
+                ast_lambda = cast(
+                    ast.Lambda,
+                    cast(ast.Expr, fast.parse(f"lambda {arg_str}: None").body[0]).value,
+                )
                 load = ast.Load()
                 tuple_elts: list[ast.Call] = []
-                for lam in lambdas:
+                for lam in callables:
                     call_node = fast.Call(
                         func=lam,
                         args=[fast.Name(arg, ctx=load) for arg in args],
@@ -229,9 +233,10 @@ class MacroTracer(pyc.BaseTracer):
                     self.placeholder_inference_skip_nodes.add(id(call_node))
                     tuple_elts.append(call_node)
                 ast_lambda.body = fast.Tuple(tuple_elts, ctx=load)
+                callable_expr = ast_lambda
         else:
-            ast_lambda = self._handle_macro_impl(node.slice, frame, func)
-        evaluated_lambda = pyc.eval(ast_lambda, frame.f_globals, frame.f_locals)
+            callable_expr = self._handle_macro_impl(node.slice, frame, func)
+        evaluated_lambda = pyc.eval(callable_expr, frame.f_globals, frame.f_locals)
         ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731
         self.lambda_cache[lambda_cache_key] = ret
         return ret
