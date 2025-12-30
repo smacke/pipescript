@@ -532,3 +532,21 @@ if sys.version_info >= (3, 8):  # noqa
                     is False
                 )
                 assert pyc.eval("{1: 1, 2: 2, 3: 3} |> map[$ + 1] |> list") == [2, 3, 4]
+
+    def test_when():
+        with PipelineTracer:
+            with MacroTracer:
+                assert pyc.eval("1 |> when[$ > 0] |> $ + 1") == 2
+                assert pyc.eval("1 |> when[$ < 0] |> $ + 1") is None
+                assert (
+                    pyc.eval(
+                        "1 |> fork[$ |> when[$ < 0] |> $ - 41, $ |> when[$ >= 0] |> $ + 41] |> collapse"
+                    )
+                    == 42
+                )
+                assert (
+                    pyc.eval(
+                        "1 |> fork[when[$ < 0] .> $ - 41, when[$ >= 0] .> $ + 41] |> collapse"
+                    )
+                    == 42
+                )

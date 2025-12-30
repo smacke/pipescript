@@ -55,3 +55,26 @@ def fork(funcs: tuple[Callable[[T], Any]], obj: T) -> tuple[Any]:
     for func in funcs:
         results.append(func(obj))
     return tuple(results)
+
+
+pipeline_null = object()
+
+
+def when(func: Callable[[T], bool], obj: T) -> T:
+    if func(obj):
+        return obj
+    else:
+        return pipeline_null  # type: ignore[return-value]
+
+
+def collapse(results: tuple[T | None, ...]) -> T:
+    filtered_results: list[T] = []
+    for result in results:
+        if result is not None:
+            filtered_results.append(result)
+    if len(filtered_results) != 1:
+        raise ValueError(
+            "Expected exactly one non-None result, got {}".format(len(filtered_results))
+        )
+    else:
+        return filtered_results[0]

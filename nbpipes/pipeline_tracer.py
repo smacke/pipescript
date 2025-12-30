@@ -18,7 +18,14 @@ from pyccolo.trace_events import TraceEvent
 
 from nbpipes.placeholders import PlaceholderReplacer, SingletonArgCounterMixin
 from nbpipes.traceback_patch import frame_to_node_mapping, patch_find_node_ipython
-from nbpipes.utils import allow_pipelines_in_loops_and_calls, get_user_ns, null, peek
+from nbpipes.utils import (
+    allow_pipelines_in_loops_and_calls,
+    collapse,
+    get_user_ns,
+    null,
+    peek,
+    pipeline_null,
+)
 
 
 def node_is_bitor_op(
@@ -223,7 +230,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     placeholder_replacer = PlaceholderReplacer(arg_placeholder_spec)
 
-    extra_builtins = [allow_pipelines_in_loops_and_calls, null, peek]
+    extra_builtins = [allow_pipelines_in_loops_and_calls, collapse, null, peek]
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -505,8 +512,6 @@ class PipelineTracer(pyc.BaseTracer):
         evaluated_lambda = pyc.eval(ast_lambda, frame.f_globals, frame.f_locals)
         return lambda *_, **__: __hide_pyccolo_frame__ and evaluated_lambda
 
-    pipeline_null = object()
-
     @pyc.register_handler(
         pyc.before_binop,
         when=lambda node: node_is_bitor_op(node) and is_outer_or_allowlisted(node),
@@ -518,7 +523,6 @@ class PipelineTracer(pyc.BaseTracer):
             self.binop_nodes_to_eval.remove(id(node))
             return ret
         __hide_pyccolo_frame__ = True
-        pipeline_null = self.pipeline_null
         frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node.left
         this_node_augmentations = self.get_augmentations(id(node))
         if self.pipeline_op_spec in this_node_augmentations:
@@ -682,7 +686,7 @@ class PipelineTracer(pyc.BaseTracer):
         and is_outer_or_allowlisted(node),
     )
     def coalesce_pipeline_null(self, ret, *_, **__):
-        if ret is self.pipeline_null:
+        if ret is pipeline_null:
             return pyc.Null
         else:
             return ret
@@ -704,7 +708,12 @@ class PipelineTracer(pyc.BaseTracer):
 
             def __pipeline_compose(f, g):
                 def __composed(*args, **kwargs):
-                    return __hide_pyccolo_frame__ and f(g(*args, **kwargs))
+                    g_result = __hide_pyccolo_frame__ and g(*args, **kwargs)
+                    return (
+                        __hide_pyccolo_frame__ and None
+                        if g_result is pipeline_null
+                        else f(g_result)
+                    )
 
                 return __composed
 
@@ -716,7 +725,12 @@ class PipelineTracer(pyc.BaseTracer):
 
             def __pipeline_tuple_compose(f, g):
                 def __tuple_composed(*args, **kwargs):
-                    return f(*g(*args, **kwargs))
+                    g_result = __hide_pyccolo_frame__ and g(*args, **kwargs)
+                    return (
+                        __hide_pyccolo_frame__ and None
+                        if g_result is pipeline_null
+                        else f(*g_result)
+                    )
 
                 return __tuple_composed
 
@@ -728,7 +742,12 @@ class PipelineTracer(pyc.BaseTracer):
 
             def __pipeline_dict_compose(f, g):
                 def __tuple_composed(*args, **kwargs):
-                    return f(**g(*args, **kwargs))
+                    g_result = __hide_pyccolo_frame__ and g(*args, **kwargs)
+                    return (
+                        __hide_pyccolo_frame__ and None
+                        if g_result is pipeline_null
+                        else f(**g_result)
+                    )
 
                 return __tuple_composed
 
@@ -737,7 +756,12 @@ class PipelineTracer(pyc.BaseTracer):
 
             def __left_pipeline_compose(f, g):
                 def __composed(*args, **kwargs):
-                    return __hide_pyccolo_frame__ and g(f(*args, **kwargs))
+                    f_result = __hide_pyccolo_frame__ and f(*args, **kwargs)
+                    return (
+                        __hide_pyccolo_frame__ and None
+                        if f_result is pipeline_null
+                        else g(f_result)
+                    )
 
                 return __composed
 
@@ -746,7 +770,12 @@ class PipelineTracer(pyc.BaseTracer):
 
             def __left_pipeline_tuple_compose(f, g):
                 def __tuple_composed(*args, **kwargs):
-                    return g(*f(*args, **kwargs))
+                    f_result = __hide_pyccolo_frame__ and f(*args, **kwargs)
+                    return (
+                        __hide_pyccolo_frame__ and None
+                        if f_result is pipeline_null
+                        else g(*f_result)
+                    )
 
                 return __tuple_composed
 
@@ -755,7 +784,12 @@ class PipelineTracer(pyc.BaseTracer):
 
             def __left_pipeline_dict_compose(f, g):
                 def __tuple_composed(*args, **kwargs):
-                    return g(**f(*args, **kwargs))
+                    f_result = __hide_pyccolo_frame__ and f(*args, **kwargs)
+                    return (
+                        __hide_pyccolo_frame__ and None
+                        if f_result is pipeline_null
+                        else g(**f_result)
+                    )
 
                 return __tuple_composed
 

@@ -17,7 +17,7 @@ from pyccolo.trace_events import TraceEvent
 
 from nbpipes.pipeline_tracer import PipelineTracer
 from nbpipes.placeholders import SingletonArgCounterMixin
-from nbpipes.utils import do, fork, get_user_ns
+from nbpipes.utils import do, fork, get_user_ns, when
 
 
 class _ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
@@ -98,6 +98,7 @@ class MacroTracer(pyc.BaseTracer):
         map.__name__: map,
         "imap": map,
         reduce.__name__: reduce,
+        when.__name__: when,
     }
 
     def __init__(self, *args, **kwargs) -> None:
