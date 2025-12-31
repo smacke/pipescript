@@ -45,12 +45,7 @@ class SingletonArgCounterMixin:
         if created_starred_arg:
             lambda_args.append(f"*_{cls._arg_ctr}")
             cls._arg_ctr += 1
-        extra_defaults = {
-            arg
-            for arg in extra_defaults
-            if arg in frame.f_locals
-            or (arg not in frame.f_globals and not hasattr(builtins, arg))
-        }
+        extra_defaults = {arg for arg in extra_defaults if arg in frame.f_locals}
         lambda_arg_str = ", ".join(
             itertools.chain(lambda_args, (f"{arg}={arg}" for arg in extra_defaults))
         )
