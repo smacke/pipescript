@@ -77,7 +77,7 @@ def future(func: Callable[[T], R], obj: T) -> Future[R]:
 
 # Call multiple functions on an input in parallel aggregate the results into a tuple bulk-synchronously
 # Basically a parallel version of fork
-def parallel(funcs: tuple[Callable[[T], Any]], obj: T) -> tuple[Any]:
+def parallel(funcs: tuple[Callable[[T], Any]], obj: T) -> tuple[Any, ...]:
     futures = []
     with ThreadPoolExecutor(max_workers=len(funcs)) as executor:
         for func in funcs:
