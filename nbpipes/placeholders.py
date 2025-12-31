@@ -4,7 +4,8 @@ import ast
 import builtins
 import itertools
 from contextlib import contextmanager
-from typing import Any, Generator, Sequence, cast
+from types import FrameType
+from typing import Generator, Sequence, cast
 
 import pyccolo as pyc
 
@@ -28,8 +29,9 @@ class SingletonArgCounterMixin:
         placeholder_names: list[str],
         orig_ctr: int,
         lambda_body: ast.expr,
-        frame_globals: dict[str, Any],
-    ) -> ast.Lambda:
+        frame: FrameType,
+        created_starred_arg: bool = False,
+    ) -> tuple[ast.Lambda, set[str]]:
         num_lambda_args = cls._arg_ctr - orig_ctr
         lambda_args = []
         extra_defaults = ExtractNames.extract_names(lambda_body) - set(
@@ -40,17 +42,26 @@ class SingletonArgCounterMixin:
             lambda_args.append(arg)
             extra_defaults.discard(arg)
         lambda_args.extend(placeholder_names)
+        if created_starred_arg:
+            lambda_args.append(f"*_{cls._arg_ctr}")
+            cls._arg_ctr += 1
         extra_defaults = {
             arg
             for arg in extra_defaults
-            if arg not in frame_globals and not hasattr(builtins, arg)
+            if arg in frame.f_locals
+            or (arg not in frame.f_globals and not hasattr(builtins, arg))
         }
         lambda_arg_str = ", ".join(
             itertools.chain(lambda_args, (f"{arg}={arg}" for arg in extra_defaults))
         )
-        return cast(
-            ast.Lambda,
-            cast(ast.Expr, ast.parse(f"lambda {lambda_arg_str}: None").body[0]).value,
+        return (
+            cast(
+                ast.Lambda,
+                cast(
+                    ast.Expr, ast.parse(f"lambda {lambda_arg_str}: None").body[0]
+                ).value,
+            ),
+            extra_defaults,
         )
 
 

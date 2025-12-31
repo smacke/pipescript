@@ -297,8 +297,8 @@ class PipelineTracer(pyc.BaseTracer):
         placeholder_names = self.placeholder_replacer.rewrite(
             lambda_body, allow_top_level=True, check_all_calls=False
         )
-        ast_lambda = SingletonArgCounterMixin.create_placeholder_lambda(
-            placeholder_names, orig_ctr, lambda_body, frame.f_globals
+        ast_lambda, _extra = SingletonArgCounterMixin.create_placeholder_lambda(
+            placeholder_names, orig_ctr, lambda_body, frame
         )
         ast_lambda.body = lambda_body
         if lambda_body_parent_call is None:
@@ -372,7 +372,7 @@ class PipelineTracer(pyc.BaseTracer):
         self,
         node: ast.expr,
         parent: ast.BinOp,
-        frame_globals: dict[str, Any],
+        frame: FrameType,
         allow_top_level: bool,
         full_node: ast.expr | None = None,
         associate_lhs: bool = False,
@@ -396,9 +396,10 @@ class PipelineTracer(pyc.BaseTracer):
             placeholder_names = self.reorder_placeholder_names_for_prior_positions(
                 parent.left, placeholder_names
             )
-        return SingletonArgCounterMixin.create_placeholder_lambda(
-            placeholder_names, orig_ctr, full_node or node, frame_globals
+        ast_lambda, _ = SingletonArgCounterMixin.create_placeholder_lambda(
+            placeholder_names, orig_ctr, full_node or node, frame
         )
+        return ast_lambda
 
     @pyc.register_handler(
         pyc.before_right_binop_arg,
@@ -423,7 +424,7 @@ class PipelineTracer(pyc.BaseTracer):
             return ret
         transformed = StatementMapper.bookkeeping_propagating_copy(node)
         ast_lambda = self.transform_pipeline_placeholders(
-            transformed, parent, frame.f_globals, allow_top_level=allow_top_level
+            transformed, parent, frame, allow_top_level=allow_top_level
         )
         ast_lambda.body = transformed
         evaluated_lambda = pyc.eval(ast_lambda, frame.f_globals, frame.f_locals)
@@ -498,7 +499,7 @@ class PipelineTracer(pyc.BaseTracer):
         ast_lambda = self.transform_pipeline_placeholders(
             left_arg,
             node,
-            frame.f_globals,
+            frame,
             allow_top_level=False,
             full_node=transformed,
             associate_lhs=True,

@@ -131,7 +131,10 @@ class MacroTracer(pyc.BaseTracer):
     _not_found = object()
 
     def _transform_ast_lambda_for_macro(
-        self, ast_lambda: ast.expr, func: str
+        self,
+        ast_lambda: ast.expr,
+        func: str,
+        extra_defaults: set[str],
     ) -> ast.Lambda:
         arg = f"_{self.arg_replacer.arg_ctr}"
         self.arg_replacer.arg_ctr += 1
@@ -168,7 +171,9 @@ class MacroTracer(pyc.BaseTracer):
             ast.Lambda,
             cast(
                 ast.Expr,
-                fast.parse(f"lambda {arg}, *{starred_arg}: None").body[0],
+                fast.parse(
+                    f"lambda {arg}, *{starred_arg}, {', '.join(f'{name}={name}' for name in extra_defaults)}: None"
+                ).body[0],
             ).value,
         )
         functor_lambda.body = functor_lambda_body
@@ -181,16 +186,35 @@ class MacroTracer(pyc.BaseTracer):
         orig_ctr = self.arg_replacer.arg_ctr
         lambda_body = StatementMapper.bookkeeping_propagating_copy(orig_lambda_body)
         placeholder_names = self.arg_replacer.get_placeholder_names(lambda_body)
-        if self.arg_replacer.arg_ctr == orig_ctr and len(placeholder_names) == 0:
-            ast_lambda = lambda_body
-        else:
-            ast_lambda = SingletonArgCounterMixin.create_placeholder_lambda(
-                placeholder_names, orig_ctr, lambda_body, frame.f_globals
-            )
-            ast_lambda.body = lambda_body
+        needs_call_node = (
+            self.arg_replacer.arg_ctr == orig_ctr and len(placeholder_names) == 0
+        )
+        ast_lambda, extra_defaults = SingletonArgCounterMixin.create_placeholder_lambda(
+            placeholder_names,
+            orig_ctr,
+            lambda_body,
+            frame,
+            created_starred_arg=needs_call_node,
+        )
+        if needs_call_node:
+            with fast.location_of(lambda_body):
+                load = ast.Load()
+                lambda_body = fast.Call(
+                    func=lambda_body,
+                    args=[
+                        fast.Starred(
+                            fast.Name(f"_{self.arg_replacer.arg_ctr - 1}", ctx=load),
+                            ctx=load,
+                        )
+                    ],
+                    keywords=[],
+                )
+        ast_lambda.body = lambda_body
         if func in self.macros and func != "f":
             with fast.location_of(ast_lambda):
-                ast_lambda = self._transform_ast_lambda_for_macro(ast_lambda, func)
+                ast_lambda = self._transform_ast_lambda_for_macro(
+                    ast_lambda, func, extra_defaults
+                )
         return ast_lambda
 
     @pyc.before_subscript_slice(when=is_macro, reentrant=True)

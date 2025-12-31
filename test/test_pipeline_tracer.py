@@ -564,3 +564,31 @@ if sys.version_info >= (3, 8):  # noqa
                     10,
                     24,
                 )
+
+    def test_do_multiple():
+        with PipelineTracer:
+            with MacroTracer:
+                pyc.exec(
+                    textwrap.dedent(
+                        """
+                        lst = []
+                        def func(*args):
+                            lst.extend(args)
+                        (1, 2) *|> do[func] |> null
+                        assert lst == [1, 2]
+                        """.strip(
+                            "\n"
+                        )
+                    )
+                )
+                pyc.exec(
+                    textwrap.dedent(
+                        """
+                        lst = []
+                        (1, 2) *|> do[lst.extend([$, $])] |> null
+                        assert lst == [1, 2]
+                        """.strip(
+                            "\n"
+                        )
+                    )
+                )
