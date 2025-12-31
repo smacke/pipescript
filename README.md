@@ -8,17 +8,10 @@ nbpipes
 [![PyPI Version](https://img.shields.io/pypi/v/nbpipes.svg)](https://pypi.org/project/nbpipes)
 
 nbpipes is an IPython extension that brings a pipe operator `|>` and
-powerful placeholder syntax extensions to IPython and Jupyter. It is:
-- Just a library you can install from PyPI, compatible with a wide range of Python 3
-  versions -- no fancy installation instructions, no complicated language distribution
-  to install
-- Intended for Jupyter notebooks, for the IPython REPL, or for any interactive
-  Python environment built on top of IPython
-- Fully compatible with all existing Python standard and third-party libraries that
-  you already know and love
+powerful placeholder and macro expansion syntax extensions to IPython and Jupyter.
 
 If you're familiar with the [magrittr](https://magrittr.tidyverse.org/) package
-for R, then you'll be right  at home with nbpipes.
+for R, then you'll be right at home with nbpipes.
 
 
 ## Getting Started
@@ -59,7 +52,7 @@ inspect and verify the result.
 ### Placeholders
 
 The power of the `|>` operator is amplified via placeholder syntax for implicit
-lambda construction: for nbpipes, we use `$` to stand in for function arguments
+function construction: for nbpipes, we use `$` to stand in for function arguments
 and induce function creation:
 
 ```python
@@ -129,11 +122,91 @@ step of an nbpipes pipeline, this *undetermined pipeline* will represent a funct
 
 ```python
 >>> second_largest_value = $ |> sorted($, reverse=True) |> $[1]
->>> [3, 8, 1, 5, 6] |> second_largest_value
+>>> [3, 8, 6, 5, 1] |> second_largest_value
 6
 ```
 
-### Macros and Curry Syntax
+### Macros and Partial Function Syntax
+
+In some cases, it may be desirable to curry a function with parameters at its start,
+akin to the typical usage of `functools.partial`. For example:
+
+```python
+>>> add_reducer = reduce(lambda x, y: x + y, $, $)
+>>> add_reducer([1, 2, 3], 0)
+6
+>>> add_reducer([[1, 2, 3], [4, 5, 6]], [])
+[1, 2, 3, 4, 5, 6]
+```
+
+To avoid writing out a `$` placeholder for each and every tail argument, you can
+prefix the call itself with a `$` and omit subsequent arguments, just like in coconut:
+
+```python
+>>> add_reducer = reduce$(lambda x, y: x + y)
+>>> add_reducer([1, 2, 3], 0)
+6
+>>> add_reducer([[1, 2, 3], [4, 5, 6]], [])
+[1, 2, 3, 4, 5, 6]
+```
+
+Or even more simply, since the induced partial function retains all the same
+argument defaults as the original `reduce`, we can omit the base case:
+
+```python
+>>> add_reducer = reduce$(lambda x, y: x + y)
+>>> add_reducer([1, 2, 3])
+6
+>>> add_reducer([[1, 2, 3], [4, 5, 6]])
+[1, 2, 3, 4, 5, 6]
+```
+
+For common functional programming tools like `map`, `reduce`, and `filter`, the above
+pattern is so common that nbpipes provides corresponding macros, in which the function used
+to curry each higher order function is specified between brackets:
+
+```python
+>>> add_reducer = reduce[lambda x, y: x + y]
+>>> [1, 2, 3] |> add_reducer
+6
+>>> [[1, 2, 3], [4, 5, 6]] |> add_reducer
+[1, 2, 3, 4, 5, 6]
+```
+
+We're still writing out `lambda x, y: x + y`, which is kind of tedious -- for these
+kinds of simple lambda constructions, nbpipes provides a *quick lambda macro*, `f`:
+
+```python
+>>> add_reducer = reduce[f[$ + $]]
+>>> [1, 2, 3] |> add_reducer
+6
+>>> [[1, 2, 3], [4, 5, 6]] |> add_reducer
+[1, 2, 3, 4, 5, 6]
+```
+
+`f` can also be used on its own:
+
+```python
+>>> f[$ + $](2, 3)
+5
+
+>>> f[$a*$b + $b*$c + $a*$c](2, 3, 4)
+26
+```
+
+Furthermore, nbpipes allows you to elide the `f` out of higher order
+functional macros, so that you can simply do `add_reducer = reduce[$ + $]` instead.
+Here are a couple of nifty constructions utilizing this compact syntax:
+
+```python
+# factorial
+>>> reduce[$ * $](range(1, 5))
+24
+
+# compute a number from decimal digits
+>>> reduce[10*$ + $]([2, 3, 4])
+234
+```
 
 ### Helper Utilities
 
@@ -179,11 +252,23 @@ behavior.
 I developed nbpipes while working on
 [Advent of Code 2025](https://adventofcode.com/2025) in parallel,
 and used it for most of the input processesing portions of my solutions,
-which you can find at https://github.com/smacke/aoc2025.
+which you can find at https://github.com/smacke/aoc2025. In particular,
+the [solution for day 6](https://github.com/smacke/aoc2025/blob/main/aoc6.ipynb)
+showcases the upper limits of what is possible with nbpipes, though note that it is
+optimized for nbpipes usage and not readability, which I generally wouldn't recommend.
 
 ## What nbpipes is and is not
 
-nbpipes is not a general purpose functional programming language on top of
+nbpipes is:
+- Currently only for interactive Python environments built on top of IPython, such as
+  Jupyter, or IPython itself
+- Just a library you can install from PyPI, compatible with a wide range of Python 3
+  versions -- no fancy installation instructions, no complicated language distribution
+  to install
+- Fully compatible with all existing Python standard and third-party libraries that
+  you already know and love, since it's just Python function calls under the hood
+
+For now, nbpipes is not a general purpose functional programming language on top of
 Python. It is very much not intended for production use cases, and instead
 caters toward quick-and-dirty one-off / scratchpad type computations in IPython
 and Jupyter specifically. In short, nbpipes aims to provide simple but powerful
@@ -195,7 +280,8 @@ therefore every new operator left-associates at the same level of precedence,
 meaning that pipeline steps run from left to right in the order that they
 appear. nbpipes aims to optimize for simplicity, readability / writability, and
 predictability over feature completeness (though I'd like to think it strikes a
-fairly good balance in this regard).
+fairly good balance in this regard). nbpipes may be expanded beyond IPython / Jupyter
+depending on traction.
 
 ## How it works
 
