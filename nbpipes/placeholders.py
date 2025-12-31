@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import builtins
 import itertools
 from contextlib import contextmanager
 from types import FrameType
