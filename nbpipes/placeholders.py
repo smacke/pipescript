@@ -127,14 +127,18 @@ class PlaceholderReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
             return
         assert node.id.startswith("_")
         arg_ctr = self.arg_ctr
-        if node.id == "_":
+        name = node.id
+        if name == "_":
             self.arg_ctr += 1
-        else:
-            self.placeholder_names[node.id] = None
+        elif len(name) > 1 and name[0] == "_" and name[1].isalpha():
+            name = name[1:]
+            self.placeholder_names[name] = None
         if not self.mutate:
             return
-        if node.id == "_":
+        if name == "_":
             node.id = f"_{arg_ctr}"
+        else:
+            node.id = name
         pyc.BaseTracer.augmented_node_ids_by_spec[self.arg_placeholder_spec].discard(
             id(node)
         )

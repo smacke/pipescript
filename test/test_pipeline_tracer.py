@@ -592,3 +592,10 @@ if sys.version_info >= (3, 8):  # noqa
                         )
                     )
                 )
+
+
+def test_dict_pipeline_operator_with_named_args():
+    with PipelineTracer:
+        with MacroTracer:
+            assert pyc.eval("{'x': 1, 'y': 2} **|> f[$x + $y]") == 3
+            assert pyc.eval("{'x': 1, 'y': 2} **|> $x + $y") == 3

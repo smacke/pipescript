@@ -388,12 +388,14 @@ class PipelineTracer(pyc.BaseTracer):
         else:
             node_to_associate = parent
         placeholder_names_to_associate = [
-            name for name in placeholder_names if not name[1].isdigit()
+            name
+            for name in placeholder_names
+            if len(name) == 1 or not name[1].isdigit()
         ]
         if placeholder_names_to_associate:
-            self.placeholder_arg_position_cache[id(node_to_associate)] = [
-                name for name in placeholder_names if not name[1].isdigit()
-            ]
+            self.placeholder_arg_position_cache[id(node_to_associate)] = (
+                placeholder_names_to_associate
+            )
         if not associate_lhs:
             placeholder_names = self.reorder_placeholder_names_for_prior_positions(
                 parent.left, placeholder_names
