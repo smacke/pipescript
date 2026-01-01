@@ -208,9 +208,45 @@ Here are a couple of nifty constructions utilizing this compact syntax:
 234
 ```
 
-### Helper Utilities
+### Additional Operators and Macros
 
-### Additional Operators
+There are a few other variants of the `|>` operator offered by
+nbpipes. The one most one is *tuple pipe*, or `*|>`, which
+tuple-unpacks the left hand side before passing its input to the
+function on the right hand side. For example:
+
+```python
+# Add two numbers:
+>>> (2, 3) *|> f[$ + $]
+5
+```
+
+A common pattern is using `*|>` to expand an undetermined pipeline
+appearing inside of a `map[...]`:
+
+```python
+# Take the product of consecutive pairs of even-odd integers
+>>> consecutive_pairs = range(10) |> list |> ($v[::2], $v[1::2]) *|> zip
+>>> consecutive_pairs |> map[$ *|> $ * $] |> list
+[0, 6, 20, 42, 72]
+```
+
+Besides `*|>`, there are a few less-commonly used operators as well. The below
+table describes the complete set of forward pipe oeprators available in nbpipes:
+
+| Operator           | Description                                                                                          | Example                                         |
+|--------------------|------------------------------------------------------------------------------------------------------|-------------------------------------------------|
+| <code>\|></code>   | Pipe LHS value into RHS function                                                                     | <code>1 \|> $ + 1</code>                        |
+| <code>*\|></code>  | Expand tuple value and pipe forward as RHS function *args                                            | <code> (1, 2) *\|> \$ + \$</code>               |
+| <code>**\|></code> | Expand dict value and pipe forward as RHS function **kwargs                                          | <code> {"x": 1, "y": 2} **\|> \$x + \$y </code> |
+| `?>`               | Like <code>\|></code> but (along with subsequent operators) only executes if LHS input is not `None` | <code> None ?> \$ + 1</code>                    |
+| `*?>`              | Tuple variant of `?>`                                                                                |                                                 |
+| `**?>`             | Dict variant  of `?>`                                                                                |                                                 |
+| `$>`               | Curry RHS function with value on LHS                                                                 | <code> add1 = 1 \$> \$ + \$ </code>             |
+| `*$>`              | Tuple variant of `$>`                                                                                |                                                 |
+| `**$>`             | Dict variant of `$>`                                                                                 |                                                 |
+
+### Helper Utilities
 
 ## Placeholder Scope
 
