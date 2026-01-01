@@ -234,6 +234,7 @@ class PipelineTracer(pyc.BaseTracer):
         self.binop_arg_nodes_to_skip: set[int] = set()
         self.binop_nodes_to_eval: set[int] = set()
         self.lexical_chain_stack: pyc.TraceStack = self.make_stack()
+        self._overridden_builtins: list[str] = []
         with self.register_additional_ast_bookkeeping():
             self.placeholder_arg_position_cache: dict[int, list[str]] = {}
         self.exc_to_propagate: Exception | None = None
@@ -245,9 +246,17 @@ class PipelineTracer(pyc.BaseTracer):
             extra_builtin_name = extra_builtin.__name__
             if hasattr(builtins, extra_builtin_name):
                 continue
+            self._overridden_builtins.append(extra_builtin_name)
             setattr(builtins, extra_builtin_name, extra_builtin)
-            if user_ns is not None:
-                user_ns[extra_builtin_name] = extra_builtin
+            if user_ns is not None and extra_builtin_name:
+                user_ns.setdefault(extra_builtin_name, extra_builtin)
+
+    def reset(self) -> None:
+        for extra_builtin_name in self._overridden_builtins:
+            if hasattr(builtins, extra_builtin_name):
+                delattr(builtins, extra_builtin_name)
+        self._overridden_builtins.clear()
+        super().reset()
 
     @pyc.register_handler(pyc.before_call, when=is_partial_call, reentrant=True)
     def curry_partial_calls(self, ret, node: ast.Call, *_, **__):
@@ -350,9 +359,8 @@ class PipelineTracer(pyc.BaseTracer):
     def maybe_skip_binop_arg(self, ret: object, node_id: int, *_, **__):
         if node_id in self.binop_arg_nodes_to_skip:
             self.binop_arg_nodes_to_skip.remove(node_id)
-            return _skip_binop_args_lambda
-        else:
-            return ret
+            ret = _skip_binop_args_lambda
+        return ret
 
     def reorder_placeholder_names_for_prior_positions(
         self, node: ast.expr, placeholder_names: list[str]

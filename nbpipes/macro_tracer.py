@@ -111,6 +111,7 @@ class MacroTracer(pyc.BaseTracer):
         super().__init__(*args, **kwargs)
         self.arg_replacer = _ArgReplacer()
         self.lambda_cache: dict[tuple[int, int, TraceEvent], Any] = {}
+        self._overridden_builtins: list[str] = []
         with self.register_additional_ast_bookkeeping():
             self.placeholder_inference_skip_nodes: set[int] = set()
         user_ns = get_user_ns()
@@ -118,8 +119,16 @@ class MacroTracer(pyc.BaseTracer):
             if hasattr(builtins, macro_name):
                 continue
             setattr(builtins, macro_name, macro)
+            self._overridden_builtins.append(macro_name)
             if user_ns is not None:
-                user_ns[macro_name] = macro
+                user_ns.setdefault(macro_name, macro)
+
+    def reset(self) -> None:
+        for macro_name in self._overridden_builtins:
+            if hasattr(builtins, macro_name):
+                delattr(builtins, macro_name)
+        self._overridden_builtins.clear()
+        super().reset()
 
     class _IdentitySubscript:
         def __getitem__(self, item):

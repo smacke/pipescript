@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 
-def get_user_ns() -> dict[str, Any] | None:
+# for unittest.mock patching
+def _get_user_ns_impl() -> dict[str, Any] | None:
     try:
         from IPython import get_ipython
 
@@ -13,3 +14,7 @@ def get_user_ns() -> dict[str, Any] | None:
     except ImportError:
         pass
     return None
+
+
+def get_user_ns() -> dict[str, Any] | None:
+    return _get_user_ns_impl()
