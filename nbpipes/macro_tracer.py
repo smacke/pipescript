@@ -15,7 +15,8 @@ from pyccolo import fast
 from pyccolo.stmt_mapper import StatementMapper
 from pyccolo.trace_events import TraceEvent
 
-from nbpipes.api import do, fork, future, parallel, when
+import nbpipes.macros
+from nbpipes.macros import do, fork, future, parallel, when
 from nbpipes.pipeline_tracer import PipelineTracer
 from nbpipes.placeholders import SingletonArgCounterMixin
 from nbpipes.utils import get_user_ns
@@ -103,6 +104,8 @@ class MacroTracer(pyc.BaseTracer):
         reduce.__name__: reduce,
         when.__name__: when,
     }
+
+    assert set(nbpipes.macros.__all__) <= set(macros.keys())
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)

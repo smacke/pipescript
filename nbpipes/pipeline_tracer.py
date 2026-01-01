@@ -16,6 +16,7 @@ from pyccolo.examples.optional_chaining import OptionalChainer
 from pyccolo.stmt_mapper import StatementMapper
 from pyccolo.trace_events import TraceEvent
 
+import nbpipes.api
 from nbpipes.api import allow_pipelines_in_loops_and_calls, collapse, null, peek
 from nbpipes.constants import pipeline_null
 from nbpipes.placeholders import PlaceholderReplacer, SingletonArgCounterMixin
@@ -226,6 +227,7 @@ class PipelineTracer(pyc.BaseTracer):
     placeholder_replacer = PlaceholderReplacer(arg_placeholder_spec)
 
     extra_builtins = [allow_pipelines_in_loops_and_calls, collapse, null, peek]
+    assert set(nbpipes.api.__all__) <= {eb.__name__ for eb in extra_builtins}
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
