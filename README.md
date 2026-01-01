@@ -194,7 +194,7 @@ kinds of simple lambda constructions, nbpipes provides a *quick lambda macro*, `
 26
 ```
 
-Furthermore, nbpipes allows you to elide the `f` out of higher order
+Furthermore, nbpipes allows you to omit the `f` from higher order
 functional macros, so that you can simply do `add_reducer = reduce[$ + $]` instead.
 Here are a couple of nifty constructions utilizing this compact syntax:
 
