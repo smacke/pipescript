@@ -200,11 +200,11 @@ Here are a couple of nifty constructions utilizing this compact syntax:
 
 ```python
 # factorial
->>> reduce[$ * $](range(1, 5))
+>>> range(1, 5) |> reduce[$ * $]
 24
 
 # compute a number from decimal digits
->>> reduce[10*$ + $]([2, 3, 4])
+>>> [2, 3, 4] |> reduce[10*$ + $]
 234
 ```
 
@@ -264,8 +264,8 @@ For example:
 
 #### Other Pipes
 
-Besides `\>>`, `*|>`, and `.>`, there are a few less-commonly used operators as well. The below
-table describes the complete set of forward pipe operators available in nbpipes:
+Besides `|>>`, `*|>`, and `.>`, nbpipes offers a few less commonly used operators as well. The below
+table describes the complete set of forward pipe operators available:
 
 | Operator           | nbpipes Syntax                                     | Python Syntax                           |
 |--------------------|----------------------------------------------------|-----------------------------------------|
@@ -297,6 +297,98 @@ as `|` (bitwise or), meaning that any pipeline steps that include an `|` binary 
 must be wrapped in parentheses.
 
 ### Additional Macros and Helper Utilities
+
+#### `do` macro
+
+Similar to [toolz](https://github.com/pytoolz/toolz), nbpipes offers a `do` macro
+implementing something similar to the following higher order function:
+
+```python
+def do(func, obj):
+    func(obj)
+    return obj
+```
+
+In the case of nbpipes, the input function `func` is specified inside of brackets,
+just as with other functional macros:
+
+```python
+>>> 2 |> $ + 2 |> do[print] |> $ + 2 |>> result
+4
+6
+```
+
+While any function expression, including undetermined pipelines, can appear inside `do[...]` brackets,
+`do[print]` is so common that nbpipes provides a `peek` utility that implements the very same:
+
+```python
+>>> 2 |> $ + 2 |> peek |> $ + 2 |>> result
+4
+6
+```
+
+To suppress the automatic expression rendering of a pipeline result, nbpipes also offers a `null` utility function
+(as in `/dev/null`), which essentially swallows its input:
+
+```python
+>>> 2 |> $ + 2 |> peek |> $ + 2 |>> result |> null
+4
+```
+
+#### `fork` and `parallel` macros
+
+If you wish to move beyond linear chains and apply the same input to multiple pipelines,
+nbpipes provides `fork` and `parallel` macros, which return the results of each function
+as a tuple:
+
+```python
+>>> range(10) |> list |> fork[
+    map[2 * $] .> filter[$ % 3 == 0],
+    map[3 * $] .> filter[$ % 2 == 0],
+]
+([0, 6, 12, 18], [0, 6, 12, 18, 24])
+```
+
+`parallel` does the same thing as `fork` but executes each function passed to it concurrently.
+
+#### `when` macro
+
+The `when` macro takes as input a value and conditional expression that, upon passing,
+forwards the value, and upon failing, terminates computation with `None`. It is particularly powerful
+when combined with `fork` and `collapse` (the latter of which extracts the non-null value out of
+the tuple that results from the `fork`):
+
+```python
+# Define a `collatz` utility and run it up to 20 times on 42
+>>> collatz = when[$ != 1] .> fork[
+    when[$ % 2 == 0] .> $ // 2,
+    when[$ % 2 == 1] .> $ * 3 + 1,
+] .> collapse .> peek
+>>> 42 |> collatz ** 20
+21
+64
+32
+16
+8
+4
+2
+1
+```
+
+Right, I forgot to mention that you can exponentiate single-argument functions in nbpipes,
+so that we don't need to write out `42 |> collatz |> collatz |> ... |> collatz`.
+
+#### `future` macro
+
+Finally, to schedule a function to run in another thread and immediately
+return a future to the eventual result, nbpipes provides a `future` macro:
+
+```python
+>>> 2 |> future[$ + 2] |> $.result()
+4
+>>> [1, 2, 3] |> future[sum] |> $.result()
+6
+```
 
 ## Placeholder Scope
 
@@ -345,7 +437,13 @@ optimized for nbpipes usage and not readability, which I generally wouldn't reco
 
 ## What nbpipes is and is not
 
-nbpipes is:
+For now, nbpipes is not a general purpose functional programming language on top of
+Python. It is very much not intended for production use cases, and instead
+caters toward quick-and-dirty one-off / scratchpad type computations in IPython
+and Jupyter specifically. In short, nbpipes aims to provide simple but powerful
+pipeline and placeholder syntax to interactive Python programming environments.
+
+Particularly, nbpipes is:
 - Currently only for interactive Python environments built on top of IPython, such as
   Jupyter, or IPython itself
 - Just a library you can install from PyPI, compatible with a wide range of Python 3
@@ -353,12 +451,6 @@ nbpipes is:
   to install
 - Fully compatible with all existing Python standard and third-party libraries that
   you already know and love, since it's just Python function calls under the hood
-
-For now, nbpipes is not a general purpose functional programming language on top of
-Python. It is very much not intended for production use cases, and instead
-caters toward quick-and-dirty one-off / scratchpad type computations in IPython
-and Jupyter specifically. In short, nbpipes aims to provide simple but powerful
-pipeline and placeholder syntax to interactive Python programming environments.
 
 All the different pipeline operators like `|>`, `<|`, `*|>`, etc. essentially
 transpile down to an instrumented variant of the bitwise-or (`|`) operator, and
