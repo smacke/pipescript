@@ -811,3 +811,25 @@ class PipelineTracer(pyc.BaseTracer):
             return __left_pipeline_dict_compose
         else:
             return ret
+
+    @pyc.register_handler(
+        pyc.before_binop,
+        when=lambda node: isinstance(node, ast.BinOp)
+        and isinstance(node.op, ast.Pow)
+        and is_outer_or_allowlisted(node),
+    )
+    def exponentiate_functions(self, ret, *_, **__):
+        __hide_pyccolo_frame__ = True
+
+        def __power_compose(func, exponent):
+            if exponent == 1:
+                return func
+            f1 = __power_compose(func, exponent // 2)
+            f2 = __power_compose(func, (exponent + 1) // 2)
+            return lambda v: __hide_pyccolo_frame__ and f1(f2(v))
+
+        return lambda x, y: (
+            __hide_pyccolo_frame__ and __power_compose(x, y)
+            if callable(x)
+            else ret(x, y)
+        )

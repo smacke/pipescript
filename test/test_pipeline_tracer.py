@@ -672,3 +672,23 @@ def test_partial_conflict_with_placeholder():
             ]
             # TODO: this requires smarter augmentation specs that can match regular expressions
             # assert pyc.eval("[1, 2, 3] |> (type($v), reversed($v)) *|>$($)") == [3, 2, 1]
+
+
+def test_function_exponentiation():
+    with PipelineTracer:
+        with MacroTracer:
+            pyc.exec(
+                textwrap.dedent(
+                    """
+                    collatz_vals = []
+                    collatz = when[$ != 1] .> fork[
+                        when[$ % 2 == 0] .> $ // 2,
+                        when[$ % 2 == 1] .> $ * 3 + 1,
+                    ] .> collapse .> do[collatz_vals.append($)]
+                    42 |> collatz ** 100 |> null
+                    assert collatz_vals == [21, 64, 32, 16, 8, 4, 2, 1]
+                    """.strip(
+                        "\n"
+                    )
+                )
+            )
