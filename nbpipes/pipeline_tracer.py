@@ -214,6 +214,13 @@ class PipelineTracer(pyc.BaseTracer):
         aug_type=pyc.AugmentationType.binop, token=". ", replacement="| "
     )
 
+    # just prevents partial call spec from taking effect when it shouldn't
+    # TODO: to deal with this properly we need a regex version of partial_call_spec
+    #   that matches tokens starting with a valid prefix
+    _non_partial_call_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token=" $(", replacement=" ($)("
+    )
+
     partial_call_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.call, token="$(", replacement="("
     )

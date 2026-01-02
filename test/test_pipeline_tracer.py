@@ -660,3 +660,15 @@ def test_environment_init():
         with PipelineTracer:
             with MacroTracer:
                 assert pyc.eval("(1, 2) *|> f", global_env=env) == 3
+
+
+def test_partial_conflict_with_placeholder():
+    with PipelineTracer:
+        with MacroTracer:
+            assert pyc.eval("[1, 2, 3] |> (type($v), reversed($v)) *|> $($)") == [
+                3,
+                2,
+                1,
+            ]
+            # TODO: this requires smarter augmentation specs that can match regular expressions
+            # assert pyc.eval("[1, 2, 3] |> (type($v), reversed($v)) *|>$($)") == [3, 2, 1]
