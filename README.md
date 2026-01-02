@@ -507,8 +507,9 @@ the [pyccolo](https://github.com/smacke/pyccolo) library to perform these rewrit
 which remembers the positions of the rewrites where they occurred, so that the eventual
 `ast.BinOp` AST node can be associated with the `|>` operator.
 
-Pyccolo is an event-based AST transformation library I developed during my PhD
-which allows you to layer multiple AST transformations on top of each other in a
+Pyccolo is a library I developed during my PhD which provides an event-driven
+architecture for declarative AST transformations. Its key selling point is that
+it allows you to layer multiple AST transformations on top of each other in a
 composable fashion. In short, you specify handlers for different AST nodes such
 as `ast.BinOp`, and pyccolo instruments these nodes by emitting events for them,
 so that when the code runs, all the handlers for a particular event are run.
