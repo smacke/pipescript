@@ -208,16 +208,20 @@ Here are a couple of nifty constructions utilizing this compact syntax:
 234
 ```
 
-### Additional Operators and Macros
+### Additional Pipe Operators
 
 There are a few other variants of the `|>` operator offered by
-nbpipes. The one most one is *tuple pipe*, or `*|>`, which
-tuple-unpacks the left hand side before passing its input to the
+nbpipes, covered in this section.
+
+#### Varargs Pipe
+
+Besides `|>`, one of the more common operators is *varargs pipe*, or `*|>`, which
+unpacks the iterable on the left hand side before passing its values as inputs to the
 function on the right hand side. For example:
 
 ```python
 # Add two numbers:
->>> (2, 3) *|> f[$ + $]
+>>> (2, 3) *|> $ + $
 5
 ```
 
@@ -231,22 +235,29 @@ appearing inside of a `map[...]`:
 [0, 6, 20, 42, 72]
 ```
 
-Besides `*|>`, there are a few less-commonly used operators as well. The below
+#### Function Pipe
+
+#### Other Pipes
+
+Besides `*|>` and `.>`, there are a few less-commonly used operators as well. The below
 table describes the complete set of forward pipe oeprators available in nbpipes:
 
-| Operator           | Description                                                                                          | Example                                         |
-|--------------------|------------------------------------------------------------------------------------------------------|-------------------------------------------------|
-| <code>\|></code>   | Pipe LHS value into RHS function                                                                     | <code>1 \|> $ + 1</code>                        |
-| <code>*\|></code>  | Expand tuple value and pipe forward as RHS function *args                                            | <code> (1, 2) *\|> \$ + \$</code>               |
-| <code>**\|></code> | Expand dict value and pipe forward as RHS function **kwargs                                          | <code> {"x": 1, "y": 2} **\|> \$x + \$y </code> |
-| `?>`               | Like <code>\|></code> but (along with subsequent operators) only executes if LHS input is not `None` | <code> None ?> \$ + 1</code>                    |
-| `*?>`              | Tuple variant of `?>`                                                                                |                                                 |
-| `**?>`             | Dict variant  of `?>`                                                                                |                                                 |
-| `$>`               | Curry RHS function with value on LHS                                                                 | <code> add1 = 1 \$> \$ + \$ </code>             |
-| `*$>`              | Tuple variant of `$>`                                                                                |                                                 |
-| `**$>`             | Dict variant of `$>`                                                                                 |                                                 |
+| Operator           | nbpipes Syntax                                    | Python Syntax                           |
+|--------------------|---------------------------------------------------|-----------------------------------------|
+| <code>\|></code>   | <code>y = x \|> f</code>                          | `y = f(x)`                              |
+| <code>*\|></code>  | <code>y = x *\|> f</code> where `x` is a sequence | `y = f(*x)`                             |
+| <code>**\|></code> | <code>y = x **\|> f</code> where `x` is a dict    | `y = f(**x)`                            |
+| `.>`               | `h = g .> f`                                      | `h = lambda *a, **kw: g(f(*a, **kw))`   |
+| `*.>`              | `h = g *.> f`                                     | `h = lambda *a, **kw: g(*f(*a, **kw))`  |
+| `**.>`             | `h = g **.> f`                                    | `h = lambda *a, **kw: g(**f(*a, **kw))` |
+| `?>`               | `y = x ?> f`                                      | `y = None if x is None else f(x)`       |
+| `*?>`              | `y = x *?> f` where `x` is a sequence, or `None`  | `y = None if x is None else f(*x)`      |
+| `**?>`             | `y = x **?> f` where `x` is a dict, or `None`     | `y = None if x is None else f(**x)`     |
+| `$>`               | `g = x $> f`                                      | `g = functools.partial(f, x)`           |
+| `*$>`              | `g = x *$> f` where `x` is a sequence             | `g = functools.partial(f, *x)`          |
+| `**$>`             | `g = x **$> f` where `x` is a dict                | `g = functools.partial(f, **x)`         |
 
-### Helper Utilities
+### Additional Macros and Helper Utilities
 
 ## Placeholder Scope
 

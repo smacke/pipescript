@@ -650,7 +650,7 @@ def test_dict_pipeline_operator_with_named_args():
             assert pyc.eval("{'x': 1, 'y': 2} **|> $x + $y") == 3
 
 
-def test_environment():
+def test_environment_init():
     env = pyc.exec("def f(x, y): return x + y")
     with patch.object(
         nbpipes.utils, nbpipes.utils._get_user_ns_impl.__name__, return_value=env
