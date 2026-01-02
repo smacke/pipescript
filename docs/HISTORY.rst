@@ -1,7 +1,7 @@
 History
 =======
 
-0.0.3 (2026-01-02)
+0.0.4 (2026-01-02)
 ------------------
 * First "complete" release with core functionality and an actual readme;
 
