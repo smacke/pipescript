@@ -10,8 +10,10 @@ build: clean
 bump:
 	./scripts/bump-version.py
 
-deploy: build
+deploy_only:
 	./scripts/deploy.sh
+
+deploy: build deploy_only
 
 black:
 	isort .
