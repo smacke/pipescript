@@ -821,6 +821,7 @@ class PipelineTracer(pyc.BaseTracer):
     def exponentiate_functions(self, ret, *_, **__):
         __hide_pyccolo_frame__ = True
 
+        @functools.cache
         def __power_compose(func, exponent):
             if exponent == 1:
                 return func
