@@ -826,7 +826,12 @@ class PipelineTracer(pyc.BaseTracer):
                 return func
             f1 = __power_compose(func, exponent // 2)
             f2 = __power_compose(func, (exponent + 1) // 2)
-            return lambda v: __hide_pyccolo_frame__ and f1(f2(v))
+
+            return lambda v, *args: (
+                __hide_pyccolo_frame__ and f1(f2(v))
+                if len(args) == 0
+                else f1(*f2(v, *args))
+            )
 
         return lambda x, y: (
             __hide_pyccolo_frame__ and __power_compose(x, y)

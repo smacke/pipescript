@@ -696,3 +696,25 @@ def test_function_exponentiation():
             assert pyc.eval("1 |> ($ |> $ + 1) ** 3") == 4
             assert pyc.eval("f[$ + $]($, 1) ** 3 <| 1") == 4
             assert pyc.eval("1 |> f[f[$ + $]($, 1)] ** 3") == 4
+
+
+def test_multi_arg_function_exponentiation():
+    with PipelineTracer:
+        with MacroTracer:
+            pyc.exec(
+                textwrap.dedent(
+                    """
+                    def square(v1, v2, v3):
+                        return v1**2, v2**2, v3**2
+                        
+                    assert (1, 2, 3) *|> square ** 2 == (1, 16, 81)
+                    
+                    def triple(*args):
+                        return tuple(3*v for v in args)
+                        
+                    assert (1, 2, 3) *|> triple ** 2 == (9, 18, 27)
+                    """.strip(
+                        "\n"
+                    )
+                )
+            )
