@@ -533,7 +533,7 @@ autocomplete can continue to function as normal (for the most part).
 
 Implementation-wise, thanks pyccolo's heavy lifting, I was able to implement a decently large
 amount of the new syntax offered by nbpipes largely over the course of my time
-off during a single month (December 2025) in less than 2000 lines of code (excluding tests).
+off during the 2025 holiday season in less than 2000 lines of code (excluding tests).
 
 ## Inspiration
 
