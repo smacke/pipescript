@@ -32,7 +32,7 @@ in your current session.
 Let's look at a few examples to give a flavor of what you can do with nbpipes:
 
 ```python
-# Display a sorted version of a tuple
+# Render a sorted version of a tuple
 >>> tup = (3, 4, 1, 5, 6)
 >>> tup |> sorted |> tuple
 (1, 3, 4, 5, 6)
@@ -426,13 +426,49 @@ behavior.
 
 ## Performance Overhead
 
+Because nbpipes is implemented using instrumentation (see [How it works](#how-it-works)),
+it does incur overhead. For top-level code written in a Jupyter cell (e.g.,
+code that doesn't have any indentation), the additional overhead generally doesn't matter,
+as it tends to be insignificant when compared to data-intensive dataframe operations
+and SQL queries common in data science workloads. For code invoked repeatedly in loop
+bodies or function calls, however, this overhead can become noticeable; as such, nbpipes
+syntax is not enabled by default in these contexts. To opt into nbpipes syntax in loops
+and bodies, use the `allow_pipelines_in_loops_and_calls` context manager / decorator.
+
+Example of how to embed an nbpipes pipeline in a function body:
+
+```python
+@allow_pipelines_in_loops_and_calls
+def compute_first_k_sums_of_squares(k):
+    lst = []
+    for i in range(1, k + 1):
+        i |> $ ** 2 |> $ + sum(lst) |> do[lst.append($)]
+    return lst
+```
+
+Such functions can be used as normal:
+
+```python
+>>> 10 |> compute_first_k_sums_of_squares
+[1, 5, 15, 37, 83, 177, 367, 749, 1515, 3049]
+```
+
+Example of embedding a pipeline in a loop:
+
+```python
+lst = []
+with allow_pipelines_in_loops_and_calls():
+    for i in range(1, 101):
+        i |> $ ** 2 |> $ + sum(lst) |> do[lst.append($)]
+```
+
 ## More Examples
 I developed nbpipes while working on
 [Advent of Code 2025](https://adventofcode.com/2025) in parallel,
-and used it for most of the input processesing portions of my solutions,
-which you can find at https://github.com/smacke/aoc2025. In particular,
+and used it for most of the input processesing portions of my solutions.
+You can find these solutions at https://github.com/smacke/aoc2025. In particular,
 the [solution for day 6](https://github.com/smacke/aoc2025/blob/main/aoc6.ipynb)
-showcases the upper limits of what is possible with nbpipes, though note that it is
+showcases the upper limits of what is possible with nbpipes. Note however that it is
 optimized for nbpipes usage and not readability, which I generally wouldn't recommend.
 
 ## What nbpipes is and is not
@@ -463,13 +499,49 @@ depending on traction.
 
 ## How it works
 
+nbpipes works by transforming syntax in two stages. First, it rewrites token spans
+like `|>` and `*|>` that are illegal in Python to legal ones -- for the previous
+examples, both spans are rewritten to bitwise or, `|`. After these transformations,
+the resulting code is valid (but likely not runnable) Python syntax. nbpipes uses
+the [pyccolo](https://github.com/smacke/pyccolo) library to perform these rewrites,
+which remembers the positions of the rewrites where they occurred, so that the eventual
+`ast.BinOp` AST node can be associated with the `|>` operator.
+
+Pyccolo is an event-based AST transformation library I developed during my PhD
+which allows you to layer multiple AST transformations on top of each other in a
+composable fashion. In short, you specify handlers for different AST nodes such
+as `ast.BinOp`, and pyccolo instruments these nodes by emitting events for them,
+so that when the code runs, all the handlers for a particular event are run.
+Such event handlers are what allow us to change the behavior of `ast.BinOp`
+nodes that have been associated with various custom operators like `|>`.
+
+Because the same event emission transformation can be leveraged by multiple
+associated handlers, you generally don't need to worry about said
+transformations rewriting the AST in ways that conflict with each other. This
+composability lies in stark contrast with the challenges you would face if you
+were to just create a bunch of `ast.NodeTransformer` instances to perform
+transformations. The strategy employed by pyccolo therefore allows for
+incremental and iterative feature development without requiring large rewrites
+as new features are introduced.
+
+To summarize, nbpipes rewrites its syntax to valid Python, and then runs this Python in
+an instrumented fashion using pyccolo. Because everything is just running in
+Python, nbpipes is effectively a Python superset, and because the transformed
+Python that is instrumented is fairly similar visually to nbpipes syntax,
+various Jupyter ergonomical features like readable stack traces and jedi-based
+autocomplete can continue to function as normal (for the most part).
+
+Implementation-wise, thanks pyccolo's heavy lifting, I was able to implement a decently large
+amount of the new syntax offered by nbpipes largely over the course of my time
+off during a single month (December 2025) in less than 2000 lines of code (excluding tests).
+
 ## Inspiration
 
 nbpipes draws inspiration largely from
 [magrittr](https://magrittr.tidyverse.org/), but also from efforts like
 [coconut](https://coconut-lang.org/) (a functional superset of Python),
-as well as from libraries like [Pipe](https://github.com/JulienPalard/Pipe) which
-take a different approach to fill Python's pipe gap with operator overloading hacks.
+as well as from libraries like [Pipe](https://github.com/JulienPalard/Pipe) and [toolz](https://github.com/pytoolz/toolz) which
+fill some of Python's pipe and functional programming gaps with elegant APIs.
 
 ## License
 Code in this project licensed under the [BSD-3-Clause License](https://opensource.org/licenses/BSD-3-Clause).
