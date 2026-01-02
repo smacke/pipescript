@@ -692,3 +692,7 @@ def test_function_exponentiation():
                     )
                 )
             )
+            assert pyc.eval("($ |> $ + 1) ** 3 <| 1") == 4
+            assert pyc.eval("1 |> ($ |> $ + 1) ** 3") == 4
+            assert pyc.eval("f[$ + $]($, 1) ** 3 <| 1") == 4
+            assert pyc.eval("1 |> f[f[$ + $]($, 1)] ** 3") == 4
