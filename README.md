@@ -213,11 +213,24 @@ Here are a couple of nifty constructions utilizing this compact syntax:
 There are a few other variants of the `|>` operator offered by
 nbpipes, covered in this section.
 
+#### Assignment Pipe
+
+The *assignment pipe*, `|>>`, writes the left hand side value to the variable
+whose name is specified on the right hand side. Furthermore, it evaluates to
+the left hand side value. For example:
+
+```python
+>>> 2 |> $ + 2 |>> two_plus_two |> $ + 3 |>> two_plus_two_plus_three
+7
+>>> (two_plus_two, two_plus_two_plus_three)
+(4, 7)
+```
+
 #### Varargs Pipe
 
-Besides `|>`, one of the more common operators is *varargs pipe*, or `*|>`, which
-unpacks the iterable on the left hand side before passing its values as inputs to the
-function on the right hand side. For example:
+The *varargs pipe*, `*|>`, unpacks the iterable on the left hand side before
+passing its values as inputs to the function on the right hand side. For
+example:
 
 ```python
 # Add two numbers:
@@ -237,25 +250,51 @@ appearing inside of a `map[...]`:
 
 #### Function Pipe
 
+The other commonly used pipe is the *function pipe*, `.>`, which is used to compose
+the functions specified on the left hand side and right hand side together, with the
+function on the left hand side being applied first in the composition (note that this
+behavior is reversed from normal function composition, but follows the flow of data better).
+For example:
+
+```python
+>>> reverse = reversed .> list
+>>> [1, 2, 3] |> reverse
+[3, 2, 1]
+```
+
 #### Other Pipes
 
-Besides `*|>` and `.>`, there are a few less-commonly used operators as well. The below
-table describes the complete set of forward pipe oeprators available in nbpipes:
+Besides `\>>`, `*|>`, and `.>`, there are a few less-commonly used operators as well. The below
+table describes the complete set of forward pipe operators available in nbpipes:
 
-| Operator           | nbpipes Syntax                                    | Python Syntax                           |
-|--------------------|---------------------------------------------------|-----------------------------------------|
-| <code>\|></code>   | <code>y = x \|> f</code>                          | `y = f(x)`                              |
-| <code>*\|></code>  | <code>y = x *\|> f</code> where `x` is a sequence | `y = f(*x)`                             |
-| <code>**\|></code> | <code>y = x **\|> f</code> where `x` is a dict    | `y = f(**x)`                            |
-| `.>`               | `h = g .> f`                                      | `h = lambda *a, **kw: g(f(*a, **kw))`   |
-| `*.>`              | `h = g *.> f`                                     | `h = lambda *a, **kw: g(*f(*a, **kw))`  |
-| `**.>`             | `h = g **.> f`                                    | `h = lambda *a, **kw: g(**f(*a, **kw))` |
-| `?>`               | `y = x ?> f`                                      | `y = None if x is None else f(x)`       |
-| `*?>`              | `y = x *?> f` where `x` is a sequence, or `None`  | `y = None if x is None else f(*x)`      |
-| `**?>`             | `y = x **?> f` where `x` is a dict, or `None`     | `y = None if x is None else f(**x)`     |
-| `$>`               | `g = x $> f`                                      | `g = functools.partial(f, x)`           |
-| `*$>`              | `g = x *$> f` where `x` is a sequence             | `g = functools.partial(f, *x)`          |
-| `**$>`             | `g = x **$> f` where `x` is a dict                | `g = functools.partial(f, **x)`         |
+| Operator           | nbpipes Syntax                                     | Python Syntax                           |
+|--------------------|----------------------------------------------------|-----------------------------------------|
+| <code>\|></code>   | <code>y = x \|> f</code>                           | `y = f(x)`                              |
+| <code>\|>></code>  | <code>x \|>> y</code>                              | `y = x; y`                              |
+| <code>*\|></code>  | <code>y = x *\|> f</code> where `x` is an iterable | `y = f(*x)`                             |
+| <code>**\|></code> | <code>y = x **\|> f</code> where `x` is a dict     | `y = f(**x)`                            |
+| `.>`               | `h = g .> f`                                       | `h = lambda *a, **kw: g(f(*a, **kw))`   |
+| `*.>`              | `h = g *.> f`                                      | `h = lambda *a, **kw: g(*f(*a, **kw))`  |
+| `**.>`             | `h = g **.> f`                                     | `h = lambda *a, **kw: g(**f(*a, **kw))` |
+| `?>`               | `y = x ?> f`                                       | `y = None if x is None else f(x)`       |
+| `*?>`              | `y = x *?> f` where `x` is an iterable, or `None`  | `y = None if x is None else f(*x)`      |
+| `**?>`             | `y = x **?> f` where `x` is a dict, or `None`      | `y = None if x is None else f(**x)`     |
+| `$>`               | `g = x $> f`                                       | `g = functools.partial(f, x)`           |
+| `*$>`              | `g = x *$> f` where `x` is an iterable             | `g = functools.partial(f, *x)`          |
+| `**$>`             | `g = x **$> f` where `x` is a dict                 | `g = functools.partial(f, **x)`         |
+
+Except for `|>>`, each and every operator has a corresponding *backward* variant; e.g. `<|` is the backward variant
+of `|>` and is a low-precedence apply. For example:
+
+```python
+>>> reversed .> list <| [1, 2, 3]
+[3, 2, 1]
+```
+
+All pipe operators are applied in order from left to right (including backward pipes).
+Furthermore, all pipe operators are left associative and operate at the same precedence
+as `|` (bitwise or), meaning that any pipeline steps that include an `|` binary operation
+must be wrapped in parentheses.
 
 ### Additional Macros and Helper Utilities
 
