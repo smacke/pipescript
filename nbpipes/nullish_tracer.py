@@ -19,6 +19,7 @@ def should_instrument_for_spec(
 ) -> Callable[[ast.AST | int], bool]:
     if isinstance(spec, str):
         spec = getattr(NullishTracer, spec)
+    assert not isinstance(spec, str)
     return lambda node: is_outer_or_allowlisted(node) and has_augmentations(
         getattr(node, attr or "", node), spec
     )
@@ -30,6 +31,7 @@ def should_instrument_for_spec_on_parent(
 ) -> Callable[[ast.AST | int], bool]:
     if isinstance(spec, str):
         spec = getattr(NullishTracer, spec)
+    assert not isinstance(spec, str)
 
     def should_instrument(node_or_id: ast.AST | int) -> bool:
         node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
@@ -134,7 +136,9 @@ class NullishTracer(pyc.BaseTracer):
             {optional_chaining_spec, permissive_attr_dereference_spec}
         ),
     )
-    def handle_before_attr(self, obj, node: ast.Attribute, *_, **__):
+    def handle_before_attr_with_optional_chaining_spec(
+        self, obj, node: ast.Attribute, *_, **__
+    ):
         this_node_augmentations = self.get_augmentations(id(node))
         if self.optional_chaining_spec in this_node_augmentations and obj is None:
             return self.resolves_to_none_eventually
@@ -150,7 +154,7 @@ class NullishTracer(pyc.BaseTracer):
         pyc.before_call,
         when=should_instrument_for_spec(call_optional_chaining_spec),
     )
-    def handle_before_call(self, func, *_, **__):
+    def handle_before_call_with_call_optional_chaining_spec(self, func, *_, **__):
         if func is None:
             func = self.resolves_to_none_eventually
         with self.lexical_call_stack.push():
@@ -161,7 +165,9 @@ class NullishTracer(pyc.BaseTracer):
         pyc.before_argument,
         when=should_instrument_for_spec_on_parent(call_optional_chaining_spec),
     )
-    def handle_before_arg(self, arg_lambda, *_, **__):
+    def handle_before_arg_of_func_with_call_optional_chaining_spec(
+        self, arg_lambda, *_, **__
+    ):
         if self.cur_call_is_none_resolver:
             return lambda: None
         else:
@@ -171,11 +177,11 @@ class NullishTracer(pyc.BaseTracer):
         pyc.after_call,
         when=should_instrument_for_spec(call_optional_chaining_spec),
     )
-    def handle_after_call(self, *_, **__):
+    def handle_after_call_with_call_optional_chaining_spec(self, *_, **__):
         self.lexical_call_stack.pop()
 
     @pyc.register_raw_handler(pyc.after_load_complex_symbol, when=chain_checker)
-    def handle_after_load_complex_symbol(self, ret, *_, **__):
+    def handle_after_chain_with_optional_specs(self, ret, *_, **__):
         if isinstance(ret, self.ResolvesToNone):
             return pyc.Null
         else:
@@ -186,7 +192,7 @@ class NullishTracer(pyc.BaseTracer):
         when=lambda node: isinstance(node.op, ast.Or)
         and should_instrument_for_spec("nullish_coalescing_spec", attr="values")(node),
     )
-    def before_or_boolop(self, ret, node: ast.BoolOp, *_, **__):
+    def before_or_boolop_nullish_coalesce(self, ret, node: ast.BoolOp, *_, **__):
         with self.lexical_nullish_stack.push():
             self.cur_boolop_has_nullish_coalescer = any(
                 self.nullish_coalescing_spec in self.get_augmentations(id(val))
@@ -200,7 +206,7 @@ class NullishTracer(pyc.BaseTracer):
         when=lambda node: isinstance(node.op, ast.Or)
         and should_instrument_for_spec("nullish_coalescing_spec", attr="values")(node),
     )
-    def after_or_boolop(self, *_, **__):
+    def after_or_boolop_nullish_coalesce(self, *_, **__):
         self.lexical_nullish_stack.pop()
 
     def _maybe_compute_nullish_coalesced_value(self, ret, node_id: int) -> None:
@@ -219,7 +225,7 @@ class NullishTracer(pyc.BaseTracer):
             "nullish_coalescing_spec", attr="values"
         )(node_id),
     )
-    def before_or_boolup(self, ret, node_id: int, *_, is_last: bool, **__):
+    def coalesce_boolop_values(self, ret, node_id: int, *_, is_last: bool, **__):
         if self.cur_boolop_has_nullish_coalescer:
             if is_last:
                 if self.coalesced_value is None:
