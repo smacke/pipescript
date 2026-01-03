@@ -8,16 +8,16 @@ from unittest.mock import patch
 import pyccolo as pyc
 
 import nbpipes.utils
-from nbpipes.macro_tracer import MacroTracer
-from nbpipes.nullish_tracer import NullishTracer
-from nbpipes.pipeline_tracer import PipelineTracer
+from nbpipes.tracers.macro_tracer import MacroTracer
+from nbpipes.tracers.optional_chaining_tracer import OptionalChainingTracer
+from nbpipes.tracers.pipeline_tracer import PipelineTracer
 
 
 @contextmanager
 def all_tracers() -> Generator[None, None, None]:
     with PipelineTracer:
         with MacroTracer:
-            with NullishTracer:
+            with OptionalChainingTracer:
                 yield
 
 
@@ -636,7 +636,7 @@ def test_environment_init():
     ):
         PipelineTracer.instance().reset()
         MacroTracer.instance().reset()
-        NullishTracer.instance().reset()
+        OptionalChainingTracer.instance().reset()
         with all_tracers():
             assert pyc.eval("(1, 2) *|> f", global_env=env) == 3
 

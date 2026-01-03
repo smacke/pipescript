@@ -18,7 +18,7 @@ def should_instrument_for_spec(
     attr: str | None = None,
 ) -> Callable[[ast.AST | int], bool]:
     if isinstance(spec, str):
-        spec = getattr(NullishTracer, spec)
+        spec = getattr(OptionalChainingTracer, spec)
     assert not isinstance(spec, str)
     return lambda node: is_outer_or_allowlisted(node) and has_augmentations(
         getattr(node, attr or "", node), spec
@@ -30,7 +30,7 @@ def should_instrument_for_spec_on_parent(
     attr: str | None = None,
 ) -> Callable[[ast.AST | int], bool]:
     if isinstance(spec, str):
-        spec = getattr(NullishTracer, spec)
+        spec = getattr(OptionalChainingTracer, spec)
     assert not isinstance(spec, str)
 
     def should_instrument(node_or_id: ast.AST | int) -> bool:
@@ -61,8 +61,8 @@ class NullishInstrumentationChainChecker(ast.NodeVisitor):
         if has_augmentations(
             node,
             {
-                NullishTracer.optional_chaining_spec,
-                NullishTracer.permissive_attr_dereference_spec,
+                OptionalChainingTracer.optional_chaining_spec,
+                OptionalChainingTracer.permissive_attr_dereference_spec,
             },
         ):
             self._contains_nullish_instrumentation = True
@@ -70,13 +70,13 @@ class NullishInstrumentationChainChecker(ast.NodeVisitor):
         self.visit(node.value)
 
     def visit_Call(self, node: ast.Call) -> None:
-        if has_augmentations(node, NullishTracer.call_optional_chaining_spec):
+        if has_augmentations(node, OptionalChainingTracer.call_optional_chaining_spec):
             self._contains_nullish_instrumentation = True
             return
         self.visit(node.func)
 
 
-class NullishTracer(pyc.BaseTracer):
+class OptionalChainingTracer(pyc.BaseTracer):
     global_guards_enabled = False
 
     class ResolvesToNone:

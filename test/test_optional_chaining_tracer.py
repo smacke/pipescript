@@ -4,12 +4,12 @@ import textwrap
 
 import pyccolo as pyc
 
-from nbpipes.nullish_tracer import NullishTracer
-from nbpipes.pipeline_tracer import PipelineTracer
+from nbpipes.tracers.optional_chaining_tracer import OptionalChainingTracer
+from nbpipes.tracers.pipeline_tracer import PipelineTracer
 
 
 def test_optional_chaining_simple():
-    with NullishTracer:
+    with OptionalChainingTracer:
         pyc.exec(
             textwrap.dedent(
                 """
@@ -37,7 +37,7 @@ def test_optional_chaining_simple():
 
 
 def test_permissive_attr_vs_optional_attr_qualifier():
-    with NullishTracer:
+    with OptionalChainingTracer:
         try:
             pyc.exec("foo = object(); assert foo?.bar is None")
         except AttributeError:
@@ -45,7 +45,7 @@ def test_permissive_attr_vs_optional_attr_qualifier():
         else:
             assert False
 
-    with NullishTracer:
+    with OptionalChainingTracer:
         try:
             pyc.exec("foo = object(); assert foo.?bar.baz is None")
         except AttributeError:
@@ -53,25 +53,25 @@ def test_permissive_attr_vs_optional_attr_qualifier():
         else:
             assert False
 
-    with NullishTracer:
+    with OptionalChainingTracer:
         pyc.exec("foo = object(); assert foo.?bar is None")
 
-    with NullishTracer:
+    with OptionalChainingTracer:
         pyc.exec("foo = object(); assert foo.?bar?.baz is None")
 
-    with NullishTracer:
+    with OptionalChainingTracer:
         pyc.exec("foo = object(); assert foo.?bar?.baz.bam() is None")
 
 
 def test_call_on_optional():
     # TODO: we are relying on PipelineTracer to populate AST bookkeeping. This should be fixed.
     with PipelineTracer:
-        with NullishTracer:
+        with OptionalChainingTracer:
             pyc.exec("foo = None; assert foo?.() is None")
 
 
 def test_nullish_coalescing():
-    with NullishTracer:
+    with OptionalChainingTracer:
         pyc.exec("None ?? None")
         pyc.exec("foo = ''; assert (foo ?? None) == ''")
         pyc.exec("foo = ''; assert (foo       ?? None) == ''")
@@ -87,7 +87,7 @@ def test_nullish_coalescing():
 
 
 def test_multiline_nullish_coalescing():
-    with NullishTracer:
+    with OptionalChainingTracer:
         assert (
             pyc.eval(
                 textwrap.dedent(

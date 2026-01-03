@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import pyccolo.fast as fast
 
 if TYPE_CHECKING:
-    from nbpipes.pipeline_tracer import PipelineTracer
+    from nbpipes.tracers.pipeline_tracer import PipelineTracer
 
 
 class ExtractNames(ast.NodeVisitor):
@@ -53,7 +53,7 @@ class ExtractNames(ast.NodeVisitor):
 
     @classmethod
     def extract_names(cls, node: ast.expr) -> set[str]:
-        from nbpipes.pipeline_tracer import PipelineTracer
+        from nbpipes.tracers.pipeline_tracer import PipelineTracer
 
         visitor = cls(PipelineTracer.instance())
         visitor.visit(node)

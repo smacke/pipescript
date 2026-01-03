@@ -7,26 +7,29 @@ from __future__ import annotations
 
 from IPython.core.interactiveshell import InteractiveShell
 
+import nbpipes.api
+from nbpipes.api import *  # noqa: F403
+from nbpipes.patches.completion_patch import patch_completer, unpatch_completer
+
 from . import _version  # noqa: E402
-from .completion_patch import patch_completer, unpatch_completer
 
 __version__ = _version.get_versions()["version"]
 
 
 def clear_tracer_stacks(*_, **__) -> None:
-    from nbpipes.nullish_tracer import NullishTracer
-    from nbpipes.pipeline_tracer import PipelineTracer
+    from nbpipes.tracers.optional_chaining_tracer import OptionalChainingTracer
+    from nbpipes.tracers.pipeline_tracer import PipelineTracer
 
-    NullishTracer.instance().clear_stacks()
+    OptionalChainingTracer.instance().clear_stacks()
     PipelineTracer.instance().clear_stacks()
 
 
 def load_ipython_extension(shell: InteractiveShell) -> None:
     from ipyflow.shell.interactiveshell import IPyflowInteractiveShell
 
-    from nbpipes.macro_tracer import MacroTracer
-    from nbpipes.nullish_tracer import NullishTracer
-    from nbpipes.pipeline_tracer import PipelineTracer
+    from nbpipes.tracers.macro_tracer import MacroTracer
+    from nbpipes.tracers.optional_chaining_tracer import OptionalChainingTracer
+    from nbpipes.tracers.pipeline_tracer import PipelineTracer
 
     if not isinstance(shell, IPyflowInteractiveShell):
         shell.run_line_magic("load_ext", "ipyflow.shell")
@@ -41,22 +44,22 @@ def load_ipython_extension(shell: InteractiveShell) -> None:
     )
     shell.run_line_magic(
         "flow",
-        f"register {NullishTracer.__module__}.{NullishTracer.__name__}",
+        f"register {OptionalChainingTracer.__module__}.{OptionalChainingTracer.__name__}",
     )
     shell.events.register("post_run_cell", clear_tracer_stacks)
     patch_completer(shell.Completer)
 
 
 def unload_ipython_extension(shell: InteractiveShell) -> None:
-    from nbpipes.macro_tracer import MacroTracer
-    from nbpipes.nullish_tracer import NullishTracer
-    from nbpipes.pipeline_tracer import PipelineTracer
+    from nbpipes.tracers.macro_tracer import MacroTracer
+    from nbpipes.tracers.optional_chaining_tracer import OptionalChainingTracer
+    from nbpipes.tracers.pipeline_tracer import PipelineTracer
 
     unpatch_completer(shell.Completer)
     shell.events.unregister("post_run_cell", clear_tracer_stacks)
     shell.run_line_magic(
         "flow",
-        f"deregister {NullishTracer.__module__}.{NullishTracer.__name__}",
+        f"deregister {OptionalChainingTracer.__module__}.{OptionalChainingTracer.__name__}",
     )
     shell.run_line_magic(
         "flow",
@@ -65,3 +68,6 @@ def unload_ipython_extension(shell: InteractiveShell) -> None:
     shell.run_line_magic(
         "flow", f"deregister {PipelineTracer.__module__}.{PipelineTracer.__name__}"
     )
+
+
+__all__ = list(nbpipes.api.__all__)

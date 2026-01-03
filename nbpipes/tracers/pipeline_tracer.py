@@ -16,11 +16,14 @@ from pyccolo.stmt_mapper import StatementMapper
 from pyccolo.trace_events import TraceEvent
 
 import nbpipes.api
+from nbpipes.analysis.placeholders import PlaceholderReplacer, SingletonArgCounterMixin
 from nbpipes.api import allow_pipelines_in_loops_and_calls, collapse, null, peek
 from nbpipes.constants import pipeline_null
-from nbpipes.nullish_tracer import NullishTracer
-from nbpipes.placeholders import PlaceholderReplacer, SingletonArgCounterMixin
-from nbpipes.traceback_patch import frame_to_node_mapping, patch_find_node_ipython
+from nbpipes.patches.traceback_patch import (
+    frame_to_node_mapping,
+    patch_find_node_ipython,
+)
+from nbpipes.tracers.optional_chaining_tracer import OptionalChainingTracer
 from nbpipes.utils import get_user_ns, has_augmentations, is_outer_or_allowlisted
 
 
@@ -196,7 +199,7 @@ class PipelineTracer(pyc.BaseTracer):
     placeholder_replacer = PlaceholderReplacer(arg_placeholder_spec)
 
     extra_builtins = [allow_pipelines_in_loops_and_calls, collapse, null, peek]
-    assert set(nbpipes.api.__all__) <= {eb.__name__ for eb in extra_builtins}
+    assert set(nbpipes.api.utils.__all__) <= {eb.__name__ for eb in extra_builtins}
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -241,7 +244,7 @@ class PipelineTracer(pyc.BaseTracer):
     def handle_chain_placeholder_rewrites(
         self, ret, node: ast.expr, frame: FrameType, *_, **__
     ):
-        from nbpipes.macro_tracer import MacroTracer
+        from nbpipes.tracers.macro_tracer import MacroTracer
 
         with self.lexical_chain_stack.push():
             self.cur_chain_placeholder_lambda = None
@@ -292,7 +295,7 @@ class PipelineTracer(pyc.BaseTracer):
         self.cur_chain_placeholder_lambda = lambda: __hide_pyccolo_frame__ and pyc.eval(
             node_to_eval, frame.f_globals, frame.f_locals
         )
-        return lambda: NullishTracer.resolves_to_none_eventually
+        return lambda: OptionalChainingTracer.resolves_to_none_eventually
 
     @pyc.register_raw_handler(pyc.before_argument, when=is_outer_or_allowlisted)
     def handle_before_arg(self, ret: object, *_, **__):
