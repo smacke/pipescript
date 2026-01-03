@@ -424,6 +424,24 @@ is a sequence that it sorts using the second element of each value in said
 sequence value as sort key. In most cases, `sorter2` probably gives the desired
 behavior.
 
+## Optional Chaining, Permissive Attribute Chaining, and Nullish Coalescing
+
+nbpipes also provides typescript-style optional chaining and nullish coalescing.
+That is, `a?.b.c.d().e` resolves to `None` when `a` is `None`, as does `a?.()`.
+Also, `a ?? obj` evaluates to `obj` only when `a` is `None`, but evaluates to `a`
+whenever `a` is some other falsey value like `""`, `0`, `False`, or `[]`. Note that,
+like normal boolean `or`, the nullish coalescing operator `??` is lazy and will not
+evaluate expressions on its right hand side when its left hand side is not `None`.
+
+Unlike Javascript, Python does not resolve unavailable attribute accesses to
+`undefined`, but will rather throw `AttributeError`. In nbpipes, if you would
+like to perform some kind of permissive attribute access like in Javascript, you
+can use the *permissive chaining operator* `.?` (where the `?` appears after the
+`.`) and access `b` as `a.?b`, which is equivalent to `getattr(a, "b", None)`.
+Note however that if the aforementioned expression resolves to `None`, something
+like `a.?b.c` will still throw an `AttributeError` -- to avoid that, you need to
+combine both permissive attribute chaining and optional chaining as `a.?b?.c`.
+
 ## Performance Overhead
 
 Because nbpipes is implemented using instrumentation (see [How it works](#how-it-works)),
