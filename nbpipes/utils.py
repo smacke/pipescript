@@ -26,9 +26,14 @@ def get_user_ns() -> dict[str, Any] | None:
 
 
 def has_augmentations(
-    node_or_id: ast.AST | int,
+    node_or_id: ast.AST | list[ast.AST] | int,
     expected_augs: pyc.AugmentationSpec | set[pyc.AugmentationSpec] | None = None,
 ) -> bool:
+    if isinstance(node_or_id, list):
+        return any(
+            has_augmentations(field, expected_augs=expected_augs)
+            for field in node_or_id
+        )
     node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
     actual_augs = pyc.BaseTracer.get_augmentations(node_id)
     if expected_augs is None:

@@ -208,6 +208,7 @@ class PipelineTracer(pyc.BaseTracer):
             self.placeholder_arg_position_cache: dict[int, list[str]] = {}
         self.exc_to_propagate: Exception | None = None
         with self.lexical_chain_stack.register_stack_state():
+            # TODO: pop this the right number of times if an exception occurs
             self.cur_chain_placeholder_lambda: Callable[..., Any] | None = None
         patch_find_node_ipython()
         user_ns = get_user_ns()
@@ -219,6 +220,11 @@ class PipelineTracer(pyc.BaseTracer):
             setattr(builtins, extra_builtin_name, extra_builtin)
             if user_ns is not None and extra_builtin_name:
                 user_ns.setdefault(extra_builtin_name, extra_builtin)
+
+    def clear_stacks(self):
+        # will be registered as a post_run_cell event
+        while len(self.lexical_chain_stack) > 0:
+            self.lexical_chain_stack.pop()
 
     def reset(self) -> None:
         for extra_builtin_name in self._overridden_builtins:

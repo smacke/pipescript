@@ -14,14 +14,69 @@ def parent_is_or_boolop(node_id: int) -> bool:
 
 
 def should_instrument_for_spec(
-    spec: pyc.AugmentationSpec | set[pyc.AugmentationSpec], attr: str | None = None
+    spec: pyc.AugmentationSpec | set[pyc.AugmentationSpec] | str,
+    attr: str | None = None,
 ) -> Callable[[ast.AST | int], bool]:
+    if isinstance(spec, str):
+        spec = getattr(NullishTracer, spec)
     return lambda node: is_outer_or_allowlisted(node) and has_augmentations(
         getattr(node, attr or "", node), spec
     )
 
 
+def should_instrument_for_spec_on_parent(
+    spec: pyc.AugmentationSpec | set[pyc.AugmentationSpec] | str,
+    attr: str | None = None,
+) -> Callable[[ast.AST | int], bool]:
+    if isinstance(spec, str):
+        spec = getattr(NullishTracer, spec)
+
+    def should_instrument(node_or_id: ast.AST | int) -> bool:
+        node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
+        parent = pyc.BaseTracer.containing_ast_by_id.get(node_id)
+        if parent is None or not is_outer_or_allowlisted(parent):
+            return False
+        return has_augmentations(getattr(parent, attr or "", parent), spec)
+
+    return should_instrument
+
+
+class NullishInstrumentationChainChecker(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self._contains_nullish_instrumentation = False
+
+    def __call__(self, node_id: int) -> bool:
+        if not is_outer_or_allowlisted(node_id):
+            return False
+        node = pyc.BaseTracer.ast_node_by_id.get(node_id)
+        if node is None:
+            return False
+        self._contains_nullish_instrumentation = False
+        self.visit(node)
+        return self._contains_nullish_instrumentation
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if has_augmentations(
+            node,
+            {
+                NullishTracer.optional_chaining_spec,
+                NullishTracer.permissive_attr_dereference_spec,
+            },
+        ):
+            self._contains_nullish_instrumentation = True
+            return
+        self.visit(node.value)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if has_augmentations(node, NullishTracer.call_optional_chaining_spec):
+            self._contains_nullish_instrumentation = True
+            return
+        self.visit(node.func)
+
+
 class NullishTracer(pyc.BaseTracer):
+    global_guards_enabled = False
+
     class ResolvesToNone:
         def __init__(self, eventually: bool) -> None:
             self.__eventually = eventually
@@ -39,7 +94,7 @@ class NullishTracer(pyc.BaseTracer):
     resolves_to_none_immediately = ResolvesToNone(eventually=False)
 
     call_optional_chaining_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.dot_suffix, token="?.(", replacement="("
+        aug_type=pyc.AugmentationType.call, token="?.(", replacement="("
     )
 
     optional_chaining_spec = pyc.AugmentationSpec(
@@ -54,6 +109,8 @@ class NullishTracer(pyc.BaseTracer):
         aug_type=pyc.AugmentationType.boolop, token="??", replacement=" or "
     )
 
+    chain_checker = NullishInstrumentationChainChecker()
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._saved_ret_expr = None
@@ -66,17 +123,10 @@ class NullishTracer(pyc.BaseTracer):
             self.cur_boolop_has_nullish_coalescer = False
             self.coalesced_value: Any | None = None
 
-    @pyc.register_raw_handler(pyc.after_stmt, when=is_outer_or_allowlisted)
-    def handle_after_stmt(self, ret, *_, **__):
-        self._saved_ret_expr = ret
-
-    @pyc.register_raw_handler(pyc.after_module_stmt, when=is_outer_or_allowlisted)
-    def handle_after_module_stmt(self, *_, **__):
-        while len(self.lexical_call_stack) > 0:
-            self.lexical_call_stack.pop()
-        ret = self._saved_ret_expr
-        self._saved_ret_expr = None
-        return ret
+    def clear_stacks(self):
+        # will be registered as a post_run_cell event
+        while len(self.lexical_nullish_stack) > 0:
+            self.lexical_nullish_stack.pop()
 
     @pyc.register_handler(
         pyc.before_attribute_load,
@@ -98,7 +148,7 @@ class NullishTracer(pyc.BaseTracer):
 
     @pyc.register_handler(
         pyc.before_call,
-        when=should_instrument_for_spec(call_optional_chaining_spec, "func"),
+        when=should_instrument_for_spec(call_optional_chaining_spec),
     )
     def handle_before_call(self, func, *_, **__):
         if func is None:
@@ -107,8 +157,10 @@ class NullishTracer(pyc.BaseTracer):
             self.cur_call_is_none_resolver = func is self.resolves_to_none_eventually
         return func
 
-    # TODO: add parent call's func having call_optional_chaining_spec as a `when` condition
-    @pyc.register_raw_handler(pyc.before_argument, when=is_outer_or_allowlisted)
+    @pyc.register_raw_handler(
+        pyc.before_argument,
+        when=should_instrument_for_spec_on_parent(call_optional_chaining_spec),
+    )
     def handle_before_arg(self, arg_lambda, *_, **__):
         if self.cur_call_is_none_resolver:
             return lambda: None
@@ -117,25 +169,22 @@ class NullishTracer(pyc.BaseTracer):
 
     @pyc.register_raw_handler(
         pyc.after_call,
-        when=should_instrument_for_spec(call_optional_chaining_spec, "func"),
+        when=should_instrument_for_spec(call_optional_chaining_spec),
     )
     def handle_after_call(self, *_, **__):
         self.lexical_call_stack.pop()
 
-    # TODO: add as `when` condition that there should be an augmentation spec somewhere on the chain
-    @pyc.register_raw_handler(
-        pyc.after_load_complex_symbol, when=is_outer_or_allowlisted
-    )
+    @pyc.register_raw_handler(pyc.after_load_complex_symbol, when=chain_checker)
     def handle_after_load_complex_symbol(self, ret, *_, **__):
         if isinstance(ret, self.ResolvesToNone):
             return pyc.Null
         else:
             return ret
 
-    # TODO: add as `when` condition that one of the node's values should have the nullish_coalescing_spec
     @pyc.register_handler(
         pyc.before_boolop,
-        when=lambda node: isinstance(node.op, ast.Or) and is_outer_or_allowlisted(node),
+        when=lambda node: isinstance(node.op, ast.Or)
+        and should_instrument_for_spec("nullish_coalescing_spec", attr="values")(node),
     )
     def before_or_boolop(self, ret, node: ast.BoolOp, *_, **__):
         with self.lexical_nullish_stack.push():
@@ -146,10 +195,10 @@ class NullishTracer(pyc.BaseTracer):
             self.coalesced_value = None
         return ret
 
-    # TODO: add as `when` condition that one of the node's values should have the nullish_coalescing_spec
     @pyc.register_handler(
         pyc.after_boolop,
-        when=lambda node: isinstance(node.op, ast.Or) and is_outer_or_allowlisted(node),
+        when=lambda node: isinstance(node.op, ast.Or)
+        and should_instrument_for_spec("nullish_coalescing_spec", attr="values")(node),
     )
     def after_or_boolop(self, *_, **__):
         self.lexical_nullish_stack.pop()
@@ -163,11 +212,12 @@ class NullishTracer(pyc.BaseTracer):
         else:
             self.coalesced_value = val or None
 
-    # TODO: add as `when` condition that one of the parent boolop's values should have the nullish_coalescing_spec
     @pyc.register_raw_handler(
         pyc.before_boolop_arg,
         when=lambda node_id: parent_is_or_boolop(node_id)
-        and is_outer_or_allowlisted(node_id),
+        and should_instrument_for_spec_on_parent(
+            "nullish_coalescing_spec", attr="values"
+        )(node_id),
     )
     def before_or_boolup(self, ret, node_id: int, *_, is_last: bool, **__):
         if self.cur_boolop_has_nullish_coalescer:
