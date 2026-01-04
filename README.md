@@ -7,7 +7,7 @@ pipescript
 [![Python Versions](https://img.shields.io/pypi/pyversions/pipescript.svg)](https://pypi.org/project/pipescript)
 [![PyPI Version](https://img.shields.io/pypi/v/pipescript.svg)](https://pypi.org/project/pipescript)
 
-pipescript is an IPython extension that brings a pipe operator `|>` and
+Pipescript is an IPython extension that brings a pipe operator `|>` and
 powerful placeholder and macro expansion syntax extensions to IPython and Jupyter.
 
 If you're familiar with the [magrittr](https://magrittr.tidyverse.org/) package
@@ -267,21 +267,21 @@ For example:
 Besides `|>>`, `*|>`, and `.>`, pipescript offers a few less commonly used operators as well. The below
 table describes the complete set of forward pipe operators available:
 
-| Operator           | pipescript Syntax                                     | Python Syntax                           |
-|--------------------|----------------------------------------------------|-----------------------------------------|
-| <code>\|></code>   | <code>y = x \|> f</code>                           | `y = f(x)`                              |
-| <code>\|>></code>  | <code>x \|>> y</code>                              | `y = x; y`                              |
-| <code>*\|></code>  | <code>y = x *\|> f</code> where `x` is an iterable | `y = f(*x)`                             |
-| <code>**\|></code> | <code>y = x **\|> f</code> where `x` is a dict     | `y = f(**x)`                            |
-| `.>`               | `h = g .> f`                                       | `h = lambda *a, **kw: g(f(*a, **kw))`   |
-| `*.>`              | `h = g *.> f`                                      | `h = lambda *a, **kw: g(*f(*a, **kw))`  |
-| `**.>`             | `h = g **.> f`                                     | `h = lambda *a, **kw: g(**f(*a, **kw))` |
-| `?>`               | `y = x ?> f`                                       | `y = None if x is None else f(x)`       |
-| `*?>`              | `y = x *?> f` where `x` is an iterable, or `None`  | `y = None if x is None else f(*x)`      |
-| `**?>`             | `y = x **?> f` where `x` is a dict, or `None`      | `y = None if x is None else f(**x)`     |
-| `$>`               | `g = x $> f`                                       | `g = functools.partial(f, x)`           |
-| `*$>`              | `g = x *$> f` where `x` is an iterable             | `g = functools.partial(f, *x)`          |
-| `**$>`             | `g = x **$> f` where `x` is a dict                 | `g = functools.partial(f, **x)`         |
+| Operator           | Pipescript Syntax                                   | Python Syntax                           |
+|--------------------|-----------------------------------------------------|-----------------------------------------|
+| <code>\|></code>   | <code>y = x \|> f</code>                            | `y = f(x)`                              |
+| <code>\|>></code>  | <code>x \|>> y</code>                               | `y = x; y`                              |
+| <code>*\|></code>  | <code>y = x *\|> f</code> where `x` is an iterable  | `y = f(*x)`                             |
+| <code>**\|></code> | <code>y = x **\|> f</code> where `x` is a dict      | `y = f(**x)`                            |
+| `.>`               | `h = g .> f`                                        | `h = lambda *a, **kw: g(f(*a, **kw))`   |
+| `*.>`              | `h = g *.> f`                                       | `h = lambda *a, **kw: g(*f(*a, **kw))`  |
+| `**.>`             | `h = g **.> f`                                      | `h = lambda *a, **kw: g(**f(*a, **kw))` |
+| `?>`               | `y = x ?> f`                                        | `y = None if x is None else f(x)`       |
+| `*?>`              | `y = x *?> f` where `x` is an iterable, or `None`   | `y = None if x is None else f(*x)`      |
+| `**?>`             | `y = x **?> f` where `x` is a dict, or `None`       | `y = None if x is None else f(**x)`     |
+| `$>`               | `g = x $> f`                                        | `g = functools.partial(f, x)`           |
+| `*$>`              | `g = x *$> f` where `x` is an iterable              | `g = functools.partial(f, *x)`          |
+| `**$>`             | `g = x **$> f` where `x` is a dict                  | `g = functools.partial(f, **x)`         |
 
 Except for `|>>`, each and every operator has a corresponding *backward* variant; e.g. `<|` is the backward variant
 of `|>` and is a low-precedence apply. For example:
@@ -426,7 +426,7 @@ behavior.
 
 ## Optional Chaining, Permissive Attribute Chaining, and Nullish Coalescing
 
-pipescript also provides typescript-style optional chaining and nullish coalescing.
+Pipescript also provides typescript-style optional chaining and nullish coalescing.
 That is, `a?.b.c.d().e` resolves to `None` when `a` is `None`, as does `a?.()`.
 Also, `a ?? obj` evaluates to `obj` only when `a` is `None`, but evaluates to `a`
 whenever `a` is some other falsey value like `""`, `0`, `False`, or `[]`. Note that,
@@ -510,17 +510,17 @@ All the different pipeline operators like `|>`, `<|`, `*|>`, etc. essentially
 transpile down to an instrumented variant of the bitwise-or (`|`) operator, and
 therefore every new operator left-associates at the same level of precedence,
 meaning that pipeline steps run from left to right in the order that they
-appear. pipescript aims to optimize for simplicity, readability / writability, and
+appear. Pipescript aims to optimize for simplicity, readability / writability, and
 predictability over feature completeness (though I'd like to think it strikes a
-fairly good balance in this regard). pipescript may be expanded beyond IPython / Jupyter
+fairly good balance in this regard). Pipescript may be expanded beyond IPython / Jupyter
 depending on traction.
 
 ## How it works
 
-pipescript works by transforming syntax in two stages. First, it rewrites token spans
+Pipescript works by transforming syntax in two stages. First, it rewrites token spans
 like `|>` and `*|>` that are illegal in Python to legal ones -- for the previous
 examples, both spans are rewritten to bitwise or, `|`. After these transformations,
-the resulting code is valid (but likely not runnable) Python syntax. pipescript uses
+the resulting code is valid (but likely not runnable) Python syntax. Pipescript uses
 the [pyccolo](https://github.com/smacke/pyccolo) library to perform these rewrites,
 which remembers the positions of the rewrites where they occurred, so that the eventual
 `ast.BinOp` AST node can be associated with the `|>` operator.
@@ -558,7 +558,7 @@ help of any AI agents.
 
 ## Inspiration
 
-pipescript draws inspiration largely from
+Pipescript draws inspiration largely from
 [magrittr](https://magrittr.tidyverse.org/), but also from efforts like
 [coconut](https://coconut-lang.org/) (a functional superset of Python),
 as well as from libraries like [Pipe](https://github.com/JulienPalard/Pipe) and [toolz](https://github.com/pytoolz/toolz) which

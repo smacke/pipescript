@@ -1,14 +1,10 @@
 History
 =======
 
-0.0.4 (2026-01-02)
+0.0.5 (2026-01-03)
 ------------------
-* First "complete" release with core functionality and an actual readme;
+* Initial full release;
 
-0.0.2 (2025-12-22)
-------------------
-* Initial semi-working release;
-
-0.0.1 (2025-12-22)
+0.0.1 (2025-12-30)
 ------------------
 * Initial placeholder release;
