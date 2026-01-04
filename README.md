@@ -564,5 +564,10 @@ Pipescript draws inspiration largely from
 as well as from libraries like [Pipe](https://github.com/JulienPalard/Pipe) and [toolz](https://github.com/pytoolz/toolz) which
 fill some of Python's pipe and functional programming gaps with elegant APIs.
 
+## Disclaimer
+
+**Warning: use pipescript at your own risk!**. It is very much not guaranteed to
+be bug-free -- I implemented it in a hurry before it was time to go back to work.
+
 ## License
 Code in this project licensed under the [BSD-3-Clause License](https://opensource.org/licenses/BSD-3-Clause).

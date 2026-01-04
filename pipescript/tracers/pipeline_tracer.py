@@ -16,7 +16,10 @@ from pyccolo.stmt_mapper import StatementMapper
 from pyccolo.trace_events import TraceEvent
 
 import pipescript.api
-from pipescript.analysis.placeholders import PlaceholderReplacer, SingletonArgCounterMixin
+from pipescript.analysis.placeholders import (
+    PlaceholderReplacer,
+    SingletonArgCounterMixin,
+)
 from pipescript.api import allow_pipelines_in_loops_and_calls, collapse, null, peek
 from pipescript.constants import pipeline_null
 from pipescript.patches.traceback_patch import (
