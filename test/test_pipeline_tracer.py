@@ -718,3 +718,27 @@ def test_repeat_until():
             )
             == [42, 21, 64, 32, 16, 8, 4, 2, 1]
         )
+
+
+def test_repeat_until_fancy():
+    with all_tracers():
+        assert (
+            pyc.eval(
+                textwrap.dedent(
+                    """
+                [42] |> repeat[
+                    until[$[-1] == 1] .> fork[
+                        $,
+                        $[-1] |> fork[
+                            when[$ % 2 == 0] .> $ // 2,
+                            when[$ % 2 == 1] .> $ * 3 + 1,
+                        ] |> collapse,
+                    ] *.> $ + [$]
+                ]
+                """.strip(
+                        "\n"
+                    )
+                )
+            )
+            == [42, 21, 64, 32, 16, 8, 4, 2, 1]
+        )
