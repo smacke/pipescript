@@ -12,7 +12,7 @@ enabled = true
 [tool.black]
 line-length = 88
 target-version = ['py39']
-extend-exclude = '(^/versioneer|^/nbpipes/_version)\.py'
+extend-exclude = '(^/versioneer|^/pipescript/_version)\.py'
 
 [tool.isort]
 profile = 'black'
@@ -30,8 +30,8 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ['nbpipes']
-omit = ['nbpipes/_version.py', 'nbpipes/version.py']
+source = ['pipescript']
+omit = ['pipescript/_version.py', 'pipescript/version.py']
 
 [tool.coverage.report]
 exclude_lines = [

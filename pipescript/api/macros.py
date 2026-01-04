@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable, TypeVar
 
-from nbpipes.constants import pipeline_null
+from pipescript.constants import pipeline_null
 
 T = TypeVar("T")
 R = TypeVar("R")

@@ -1,4 +1,4 @@
-name: nbpipes
+name: pipescript
 
 on: [push, pull_request, workflow_dispatch]
 

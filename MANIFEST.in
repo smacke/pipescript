@@ -1,4 +1,4 @@
 include README.md docs/HISTORY.rst
 recursive-exclude test *
 include versioneer.py
-include nbpipes/_version.py
+include pipescript/_version.py

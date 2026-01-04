@@ -1,15 +1,15 @@
 """
-nbpipes: powerful pipeline syntax for IPython and Jupyter.
-Just run `%load_ext nbpipes` to begin using pipe operators, placeholders, and more.
+pipescript: powerful pipeline syntax for IPython and Jupyter.
+Just run `%load_ext pipescript` to begin using pipe operators, placeholders, and more.
 """
 
 from __future__ import annotations
 
 from IPython.core.interactiveshell import InteractiveShell
 
-import nbpipes.api
-from nbpipes.api import *  # noqa: F403
-from nbpipes.patches.completion_patch import patch_completer, unpatch_completer
+import pipescript.api
+from pipescript.api import *  # noqa: F403
+from pipescript.patches.completion_patch import patch_completer, unpatch_completer
 
 from . import _version  # noqa: E402
 
@@ -17,8 +17,8 @@ __version__ = _version.get_versions()["version"]
 
 
 def clear_tracer_stacks(*_, **__) -> None:
-    from nbpipes.tracers.optional_chaining_tracer import OptionalChainingTracer
-    from nbpipes.tracers.pipeline_tracer import PipelineTracer
+    from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
+    from pipescript.tracers.pipeline_tracer import PipelineTracer
 
     OptionalChainingTracer.instance().clear_stacks()
     PipelineTracer.instance().clear_stacks()
@@ -27,9 +27,9 @@ def clear_tracer_stacks(*_, **__) -> None:
 def load_ipython_extension(shell: InteractiveShell) -> None:
     from ipyflow.shell.interactiveshell import IPyflowInteractiveShell
 
-    from nbpipes.tracers.macro_tracer import MacroTracer
-    from nbpipes.tracers.optional_chaining_tracer import OptionalChainingTracer
-    from nbpipes.tracers.pipeline_tracer import PipelineTracer
+    from pipescript.tracers.macro_tracer import MacroTracer
+    from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
+    from pipescript.tracers.pipeline_tracer import PipelineTracer
 
     if not isinstance(shell, IPyflowInteractiveShell):
         shell.run_line_magic("load_ext", "ipyflow.shell")
@@ -51,9 +51,9 @@ def load_ipython_extension(shell: InteractiveShell) -> None:
 
 
 def unload_ipython_extension(shell: InteractiveShell) -> None:
-    from nbpipes.tracers.macro_tracer import MacroTracer
-    from nbpipes.tracers.optional_chaining_tracer import OptionalChainingTracer
-    from nbpipes.tracers.pipeline_tracer import PipelineTracer
+    from pipescript.tracers.macro_tracer import MacroTracer
+    from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
+    from pipescript.tracers.pipeline_tracer import PipelineTracer
 
     unpatch_completer(shell.Completer)
     shell.events.unregister("post_run_cell", clear_tracer_stacks)
@@ -70,4 +70,4 @@ def unload_ipython_extension(shell: InteractiveShell) -> None:
     )
 
 
-__all__ = list(nbpipes.api.__all__)
+__all__ = list(pipescript.api.__all__)

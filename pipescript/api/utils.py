@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import TypeVar
 
-from nbpipes.constants import pipeline_null
+from pipescript.constants import pipeline_null
 
 T = TypeVar("T")
 

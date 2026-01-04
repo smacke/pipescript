@@ -8,7 +8,7 @@ from typing import Generator, Sequence, cast
 
 import pyccolo as pyc
 
-from nbpipes.analysis.extract_names import ExtractNames
+from pipescript.analysis.extract_names import ExtractNames
 
 
 class SingletonArgCounterMixin:
@@ -101,7 +101,7 @@ class PlaceholderReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
                 self.visit(kw.value)
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
-        from nbpipes.tracers.macro_tracer import MacroTracer
+        from pipescript.tracers.macro_tracer import MacroTracer
 
         if isinstance(node.value, ast.Name) and node.value.id in MacroTracer.macros:
             # defer visiting nested quick lambdas

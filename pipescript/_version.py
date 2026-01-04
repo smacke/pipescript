@@ -45,8 +45,8 @@ def get_config():
     cfg.VCS = "git"
     cfg.style = "pep440"
     cfg.tag_prefix = ""
-    cfg.parentdir_prefix = "nbpipes-"
-    cfg.versionfile_source = "nbpipes/_version.py"
+    cfg.parentdir_prefix = "pipescript-"
+    cfg.versionfile_source = "pipescript/_version.py"
     cfg.verbose = False
     return cfg
 

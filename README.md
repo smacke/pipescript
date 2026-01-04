@@ -1,35 +1,35 @@
-nbpipes
+pipescript
 =======
 
-[![CI Status](https://github.com/smacke/nbpipes/workflows/nbpipes/badge.svg)](https://github.com/smacke/nbpipes/actions)
+[![CI Status](https://github.com/smacke/pipescript/workflows/pipescript/badge.svg)](https://github.com/smacke/pipescript/actions)
 [![Checked with mypy](http://www.mypy-lang.org/static/mypy_badge.svg)](http://mypy-lang.org/)
 [![License: BSD3](https://img.shields.io/badge/License-BSD3-maroon.svg)](https://opensource.org/licenses/BSD-3-Clause)
-[![Python Versions](https://img.shields.io/pypi/pyversions/nbpipes.svg)](https://pypi.org/project/nbpipes)
-[![PyPI Version](https://img.shields.io/pypi/v/nbpipes.svg)](https://pypi.org/project/nbpipes)
+[![Python Versions](https://img.shields.io/pypi/pyversions/pipescript.svg)](https://pypi.org/project/pipescript)
+[![PyPI Version](https://img.shields.io/pypi/v/pipescript.svg)](https://pypi.org/project/pipescript)
 
-nbpipes is an IPython extension that brings a pipe operator `|>` and
+pipescript is an IPython extension that brings a pipe operator `|>` and
 powerful placeholder and macro expansion syntax extensions to IPython and Jupyter.
 
 If you're familiar with the [magrittr](https://magrittr.tidyverse.org/) package
-for R, then you'll be right at home with nbpipes.
+for R, then you'll be right at home with pipescript.
 
 
 ## Getting Started
 
-Run the following in IPython or Jupyter to install nbpipes and load
+Run the following in IPython or Jupyter to install pipescript and load
 the extension:
 
 ```python
-%pip install nbpipes
-%load_ext nbpipes
+%pip install pipescript
+%load_ext pipescript
 ```
 
-The `%load_ext nbpipes` invocation is what enables the new pipe syntax
+The `%load_ext pipescript` invocation is what enables the new pipe syntax
 in your current session.
 
 ## Features by Example
 
-Let's look at a few examples to give a flavor of what you can do with nbpipes:
+Let's look at a few examples to give a flavor of what you can do with pipescript:
 
 ```python
 # Render a sorted version of a tuple
@@ -52,7 +52,7 @@ inspect and verify the result.
 ### Placeholders
 
 The power of the `|>` operator is amplified via placeholder syntax for implicit
-function construction: for nbpipes, we use `$` to stand in for function arguments
+function construction: for pipescript, we use `$` to stand in for function arguments
 and induce function creation:
 
 ```python
@@ -103,7 +103,7 @@ Placeholders can appear anywhere -- not just as arguments to function calls:
 ### Named Placeholders
 
 There are situations that would benefit from referencing the same placeholder multiple times, for which
-nbpipes permits *named placeholders* by prefixing `$` to an identifier:
+pipescript permits *named placeholders* by prefixing `$` to an identifier:
 
 ```python
 # Pair even entries from a range with their adjacent odd entry
@@ -112,13 +112,13 @@ range(6) |> list |> zip($v[::2], $v[1::2]) |> list
 ```
 
 In the above example, we could have used any name for `$v`, the important
-thing is that the same name was used -- otherwise nbpipes would have
+thing is that the same name was used -- otherwise pipescript would have
 induced a function with two arguments instead of one.
 
 ### Undetermined Pipelines
 
 Similar to magrittr's behavior, if any number of placeholders appear in the first
-step of an nbpipes pipeline, this *undetermined pipeline* will represent a function:
+step of an pipescript pipeline, this *undetermined pipeline* will represent a function:
 
 ```python
 >>> second_largest_value = $ |> sorted($, reverse=True) |> $[1]
@@ -162,7 +162,7 @@ argument defaults as the original `reduce`, we can omit the base case:
 ```
 
 For common functional programming tools like `map`, `reduce`, and `filter`, the above
-pattern is so common that nbpipes provides corresponding macros, in which the function used
+pattern is so common that pipescript provides corresponding macros, in which the function used
 to curry each higher order function is specified between brackets:
 
 ```python
@@ -174,7 +174,7 @@ to curry each higher order function is specified between brackets:
 ```
 
 We're still writing out `lambda x, y: x + y`, which is kind of tedious -- for these
-kinds of simple lambda constructions, nbpipes provides a *quick lambda macro*, `f`:
+kinds of simple lambda constructions, pipescript provides a *quick lambda macro*, `f`:
 
 ```python
 >>> add_reducer = reduce[f[$ + $]]
@@ -194,7 +194,7 @@ kinds of simple lambda constructions, nbpipes provides a *quick lambda macro*, `
 26
 ```
 
-Furthermore, nbpipes allows you to omit the `f` from higher order
+Furthermore, pipescript allows you to omit the `f` from higher order
 functional macros, so that you can simply do `add_reducer = reduce[$ + $]` instead.
 Here are a couple of nifty constructions utilizing this compact syntax:
 
@@ -211,7 +211,7 @@ Here are a couple of nifty constructions utilizing this compact syntax:
 ### Additional Pipe Operators
 
 There are a few other variants of the `|>` operator offered by
-nbpipes, covered in this section.
+pipescript, covered in this section.
 
 #### Assignment Pipe
 
@@ -264,10 +264,10 @@ For example:
 
 #### Other Pipes
 
-Besides `|>>`, `*|>`, and `.>`, nbpipes offers a few less commonly used operators as well. The below
+Besides `|>>`, `*|>`, and `.>`, pipescript offers a few less commonly used operators as well. The below
 table describes the complete set of forward pipe operators available:
 
-| Operator           | nbpipes Syntax                                     | Python Syntax                           |
+| Operator           | pipescript Syntax                                     | Python Syntax                           |
 |--------------------|----------------------------------------------------|-----------------------------------------|
 | <code>\|></code>   | <code>y = x \|> f</code>                           | `y = f(x)`                              |
 | <code>\|>></code>  | <code>x \|>> y</code>                              | `y = x; y`                              |
@@ -300,7 +300,7 @@ must be wrapped in parentheses.
 
 #### `do` macro
 
-Similar to [toolz](https://github.com/pytoolz/toolz), nbpipes offers a `do` macro
+Similar to [toolz](https://github.com/pytoolz/toolz), pipescript offers a `do` macro
 implementing something similar to the following higher order function:
 
 ```python
@@ -309,7 +309,7 @@ def do(func, obj):
     return obj
 ```
 
-In the case of nbpipes, the input function `func` is specified inside of brackets,
+In the case of pipescript, the input function `func` is specified inside of brackets,
 just as with other functional macros:
 
 ```python
@@ -319,7 +319,7 @@ just as with other functional macros:
 ```
 
 While any function expression, including undetermined pipelines, can appear inside `do[...]` brackets,
-`do[print]` is so common that nbpipes provides a `peek` utility that implements the very same:
+`do[print]` is so common that pipescript provides a `peek` utility that implements the very same:
 
 ```python
 >>> 2 |> $ + 2 |> peek |> $ + 2 |>> result
@@ -327,7 +327,7 @@ While any function expression, including undetermined pipelines, can appear insi
 6
 ```
 
-To suppress the automatic expression rendering of a pipeline result, nbpipes also offers a `null` utility function
+To suppress the automatic expression rendering of a pipeline result, pipescript also offers a `null` utility function
 (as in `/dev/null`), which essentially swallows its input:
 
 ```python
@@ -338,7 +338,7 @@ To suppress the automatic expression rendering of a pipeline result, nbpipes als
 #### `fork` and `parallel` macros
 
 If you wish to move beyond linear chains and apply the same input to multiple pipelines,
-nbpipes provides `fork` and `parallel` macros, which return the results of each function
+pipescript provides `fork` and `parallel` macros, which return the results of each function
 as a tuple:
 
 ```python
@@ -375,13 +375,13 @@ the tuple that results from the `fork`):
 1
 ```
 
-Right, I forgot to mention that you can exponentiate single-argument functions in nbpipes,
+Right, I forgot to mention that you can exponentiate single-argument functions in pipescript,
 so that we don't need to write out `42 |> collatz |> collatz |> ... |> collatz`.
 
 #### `future` macro
 
 Finally, to schedule a function to run in another thread and immediately
-return a future to the eventual result, nbpipes provides a `future` macro:
+return a future to the eventual result, pipescript provides a `future` macro:
 
 ```python
 >>> 2 |> future[$ + 2] |> $.result()
@@ -392,7 +392,7 @@ return a future to the eventual result, nbpipes provides a `future` macro:
 
 ## Placeholder Scope
 
-A natural question is: how does nbpipes know what part of the code should
+A natural question is: how does pipescript know what part of the code should
 be included in the body of the function induced by placeholder use? The
 rules are as follows:
 
@@ -426,7 +426,7 @@ behavior.
 
 ## Optional Chaining, Permissive Attribute Chaining, and Nullish Coalescing
 
-nbpipes also provides typescript-style optional chaining and nullish coalescing.
+pipescript also provides typescript-style optional chaining and nullish coalescing.
 That is, `a?.b.c.d().e` resolves to `None` when `a` is `None`, as does `a?.()`.
 Also, `a ?? obj` evaluates to `obj` only when `a` is `None`, but evaluates to `a`
 whenever `a` is some other falsey value like `""`, `0`, `False`, or `[]`. Note that,
@@ -434,7 +434,7 @@ like normal boolean `or`, the nullish coalescing operator `??` is lazy and will 
 evaluate expressions on its right hand side when its left hand side is not `None`.
 
 Unlike Javascript, Python does not resolve unavailable attribute accesses to
-`undefined`, but will rather throw `AttributeError`. In nbpipes, if you would
+`undefined`, but will rather throw `AttributeError`. In pipescript, if you would
 like to perform some kind of permissive attribute access like in Javascript, you
 can use the *permissive chaining operator* `.?` (where the `?` appears after the
 `.`) and access `b` as `a.?b`, which is equivalent to `getattr(a, "b", None)`.
@@ -444,16 +444,16 @@ combine both permissive attribute chaining and optional chaining as `a.?b?.c`.
 
 ## Performance Overhead
 
-Because nbpipes is implemented using instrumentation (see [How it works](#how-it-works)),
+Because pipescript is implemented using instrumentation (see [How it works](#how-it-works)),
 it does incur overhead. For top-level code written in a Jupyter cell (e.g.,
 code that doesn't have any indentation), the additional overhead generally doesn't matter,
 as it tends to be insignificant when compared to data-intensive dataframe operations
 and SQL queries common in data science workloads. For code invoked repeatedly in loop
-bodies or function calls, however, this overhead can become noticeable; as such, nbpipes
-syntax is not enabled by default in these contexts. To opt into nbpipes syntax in loops
+bodies or function calls, however, this overhead can become noticeable; as such, pipescript
+syntax is not enabled by default in these contexts. To opt into pipescript syntax in loops
 and bodies, use the `allow_pipelines_in_loops_and_calls` context manager / decorator.
 
-Example of how to embed an nbpipes pipeline in a function body:
+Example of how to embed an pipescript pipeline in a function body:
 
 ```python
 @allow_pipelines_in_loops_and_calls
@@ -481,23 +481,23 @@ with allow_pipelines_in_loops_and_calls():
 ```
 
 ## More Examples
-I developed nbpipes while working on
+I developed pipescript while working on
 [Advent of Code 2025](https://adventofcode.com/2025) in parallel,
 and used it for most of the input processesing portions of my solutions.
 You can find these solutions at https://github.com/smacke/aoc2025. In particular,
 the [solution for day 6](https://github.com/smacke/aoc2025/blob/main/aoc6.ipynb)
-showcases the upper limits of what is possible with nbpipes. Note however that it is
-optimized for nbpipes usage and not readability, which I generally wouldn't recommend.
+showcases the upper limits of what is possible with pipescript. Note however that it is
+optimized for pipescript usage and not readability, which I generally wouldn't recommend.
 
-## What nbpipes is and is not
+## What pipescript is and is not
 
-For now, nbpipes is not a general purpose functional programming language on top of
+For now, pipescript is not a general purpose functional programming language on top of
 Python. It is very much not intended for production use cases, and instead
 caters toward quick-and-dirty one-off / scratchpad type computations in IPython
-and Jupyter specifically. In short, nbpipes aims to provide simple but powerful
+and Jupyter specifically. In short, pipescript aims to provide simple but powerful
 pipeline and placeholder syntax to interactive Python programming environments.
 
-Particularly, nbpipes is:
+Particularly, pipescript is:
 - Currently only for interactive Python environments built on top of IPython, such as
   Jupyter, or IPython itself
 - Just a library you can install from PyPI, compatible with a wide range of Python 3
@@ -510,17 +510,17 @@ All the different pipeline operators like `|>`, `<|`, `*|>`, etc. essentially
 transpile down to an instrumented variant of the bitwise-or (`|`) operator, and
 therefore every new operator left-associates at the same level of precedence,
 meaning that pipeline steps run from left to right in the order that they
-appear. nbpipes aims to optimize for simplicity, readability / writability, and
+appear. pipescript aims to optimize for simplicity, readability / writability, and
 predictability over feature completeness (though I'd like to think it strikes a
-fairly good balance in this regard). nbpipes may be expanded beyond IPython / Jupyter
+fairly good balance in this regard). pipescript may be expanded beyond IPython / Jupyter
 depending on traction.
 
 ## How it works
 
-nbpipes works by transforming syntax in two stages. First, it rewrites token spans
+pipescript works by transforming syntax in two stages. First, it rewrites token spans
 like `|>` and `*|>` that are illegal in Python to legal ones -- for the previous
 examples, both spans are rewritten to bitwise or, `|`. After these transformations,
-the resulting code is valid (but likely not runnable) Python syntax. nbpipes uses
+the resulting code is valid (but likely not runnable) Python syntax. pipescript uses
 the [pyccolo](https://github.com/smacke/pyccolo) library to perform these rewrites,
 which remembers the positions of the rewrites where they occurred, so that the eventual
 `ast.BinOp` AST node can be associated with the `|>` operator.
@@ -543,22 +543,22 @@ transformations. The strategy employed by pyccolo therefore allows for
 incremental and iterative feature development without requiring large rewrites
 as new features are introduced.
 
-To summarize, nbpipes rewrites its syntax to valid Python, and then runs this Python in
+To summarize, pipescript rewrites its syntax to valid Python, and then runs this Python in
 an instrumented fashion using pyccolo. Because everything is just running in
-Python, nbpipes is effectively a Python superset, and because the transformed
-Python that is instrumented is fairly similar visually to nbpipes syntax,
+Python, pipescript is effectively a Python superset, and because the transformed
+Python that is instrumented is fairly similar visually to pipescript syntax,
 various Jupyter ergonomical features like readable stack traces and jedi-based
 autocomplete can continue to function as normal (for the most part).
 
 Implementation-wise, thanks to pyccolo's heavy lifting, I was able to implement
-the initial release of nbpipes entirely over the course of time off during the
-2025 holiday season. At the time of this writing, nbpipes occupies fewer than
+the initial release of pipescript entirely over the course of time off during the
+2025 holiday season. At the time of this writing, pipescript occupies fewer than
 2000 lines of code (excluding tests), each of which was produced *without* the
 help of any AI agents.
 
 ## Inspiration
 
-nbpipes draws inspiration largely from
+pipescript draws inspiration largely from
 [magrittr](https://magrittr.tidyverse.org/), but also from efforts like
 [coconut](https://coconut-lang.org/) (a functional superset of Python),
 as well as from libraries like [Pipe](https://github.com/JulienPalard/Pipe) and [toolz](https://github.com/pytoolz/toolz) which

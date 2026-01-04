@@ -8,10 +8,10 @@ from __future__ import annotations
 import ast
 import os
 
-import nbpipes
+import pipescript
 
 join = os.path.join
-root = join(os.curdir, nbpipes.__name__)
+root = join(os.curdir, pipescript.__name__)
 
 
 _EXCEPTED_FILES = {

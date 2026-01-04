@@ -7,10 +7,10 @@ from unittest.mock import patch
 
 import pyccolo as pyc
 
-import nbpipes.utils
-from nbpipes.tracers.macro_tracer import MacroTracer
-from nbpipes.tracers.optional_chaining_tracer import OptionalChainingTracer
-from nbpipes.tracers.pipeline_tracer import PipelineTracer
+import pipescript.utils
+from pipescript.tracers.macro_tracer import MacroTracer
+from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
+from pipescript.tracers.pipeline_tracer import PipelineTracer
 
 
 @contextmanager
@@ -632,7 +632,7 @@ def test_dict_pipeline_operator_with_named_args():
 def test_environment_init():
     env = pyc.exec("def f(x, y): return x + y")
     with patch.object(
-        nbpipes.utils, nbpipes.utils._get_user_ns_impl.__name__, return_value=env
+        pipescript.utils, pipescript.utils._get_user_ns_impl.__name__, return_value=env
     ):
         PipelineTracer.instance().reset()
         MacroTracer.instance().reset()

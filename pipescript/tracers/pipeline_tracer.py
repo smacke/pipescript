@@ -15,16 +15,16 @@ import pyccolo as pyc
 from pyccolo.stmt_mapper import StatementMapper
 from pyccolo.trace_events import TraceEvent
 
-import nbpipes.api
-from nbpipes.analysis.placeholders import PlaceholderReplacer, SingletonArgCounterMixin
-from nbpipes.api import allow_pipelines_in_loops_and_calls, collapse, null, peek
-from nbpipes.constants import pipeline_null
-from nbpipes.patches.traceback_patch import (
+import pipescript.api
+from pipescript.analysis.placeholders import PlaceholderReplacer, SingletonArgCounterMixin
+from pipescript.api import allow_pipelines_in_loops_and_calls, collapse, null, peek
+from pipescript.constants import pipeline_null
+from pipescript.patches.traceback_patch import (
     frame_to_node_mapping,
     patch_find_node_ipython,
 )
-from nbpipes.tracers.optional_chaining_tracer import OptionalChainingTracer
-from nbpipes.utils import get_user_ns, has_augmentations, is_outer_or_allowlisted
+from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
+from pipescript.utils import get_user_ns, has_augmentations, is_outer_or_allowlisted
 
 
 def node_is_pipeline_bitor_op(
@@ -199,7 +199,7 @@ class PipelineTracer(pyc.BaseTracer):
     placeholder_replacer = PlaceholderReplacer(arg_placeholder_spec)
 
     extra_builtins = [allow_pipelines_in_loops_and_calls, collapse, null, peek]
-    assert set(nbpipes.api.utils.__all__) <= {eb.__name__ for eb in extra_builtins}
+    assert set(pipescript.api.utils.__all__) <= {eb.__name__ for eb in extra_builtins}
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -244,7 +244,7 @@ class PipelineTracer(pyc.BaseTracer):
     def handle_chain_placeholder_rewrites(
         self, ret, node: ast.expr, frame: FrameType, *_, **__
     ):
-        from nbpipes.tracers.macro_tracer import MacroTracer
+        from pipescript.tracers.macro_tracer import MacroTracer
 
         with self.lexical_chain_stack.push():
             self.cur_chain_placeholder_lambda = None

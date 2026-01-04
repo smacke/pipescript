@@ -4,8 +4,8 @@ import textwrap
 
 import pyccolo as pyc
 
-from nbpipes.tracers.optional_chaining_tracer import OptionalChainingTracer
-from nbpipes.tracers.pipeline_tracer import PipelineTracer
+from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
+from pipescript.tracers.pipeline_tracer import PipelineTracer
 
 
 def test_optional_chaining_simple():

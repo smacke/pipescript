@@ -15,11 +15,11 @@ from pyccolo import fast
 from pyccolo.stmt_mapper import StatementMapper
 from pyccolo.trace_events import TraceEvent
 
-import nbpipes.api.macros
-from nbpipes.analysis.placeholders import SingletonArgCounterMixin
-from nbpipes.api.macros import do, fork, future, parallel, when
-from nbpipes.tracers.pipeline_tracer import PipelineTracer
-from nbpipes.utils import get_user_ns
+import pipescript.api.macros
+from pipescript.analysis.placeholders import SingletonArgCounterMixin
+from pipescript.api.macros import do, fork, future, parallel, when
+from pipescript.tracers.pipeline_tracer import PipelineTracer
+from pipescript.utils import get_user_ns
 
 
 class _ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
@@ -105,7 +105,7 @@ class MacroTracer(pyc.BaseTracer):
         when.__name__: when,
     }
 
-    assert set(nbpipes.api.macros.__all__) <= set(macros.keys())
+    assert set(pipescript.api.macros.__all__) <= set(macros.keys())
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)

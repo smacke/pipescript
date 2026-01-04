@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 import pyccolo as pyc
 
-from nbpipes.utils import has_augmentations, is_outer_or_allowlisted
+from pipescript.utils import has_augmentations, is_outer_or_allowlisted
 
 
 def parent_is_or_boolop(node_id: int) -> bool:

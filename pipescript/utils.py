@@ -5,7 +5,7 @@ from typing import Any
 
 import pyccolo as pyc
 
-from nbpipes.api import allow_pipelines_in_loops_and_calls
+from pipescript.api import allow_pipelines_in_loops_and_calls
 
 
 # for unittest.mock patching

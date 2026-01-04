@@ -31,12 +31,12 @@ lint:
 	ruff check
 
 typecheck:
-	mypy nbpipes
+	mypy pipescript
 
 check_no_typing:
 	rm -f .coverage
 	rm -rf htmlcov
-	PYCCOLO_DEV_MODE=1 pytest --cov-config=pyproject.toml --cov=nbpipes
+	PYCCOLO_DEV_MODE=1 pytest --cov-config=pyproject.toml --cov=pipescript
 
 check: blackcheck lint typecheck check_no_typing
 

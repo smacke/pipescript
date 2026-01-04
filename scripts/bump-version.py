@@ -4,7 +4,7 @@ import argparse
 import subprocess
 import sys
 
-from nbpipes.version import make_version_tuple
+from pipescript.version import make_version_tuple
 
 
 def main(*_):
