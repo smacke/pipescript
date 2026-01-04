@@ -652,7 +652,7 @@ def test_partial_conflict_with_placeholder():
         # assert pyc.eval("[1, 2, 3] |> (type($v), reversed($v)) *|>$($)") == [3, 2, 1]
 
 
-def test_function_exponentiation():
+def test_function_exponentiation_and_repeat():
     with all_tracers():
         pyc.exec(
             textwrap.dedent(
@@ -663,6 +663,9 @@ def test_function_exponentiation():
                     when[$ % 2 == 1] .> $ * 3 + 1,
                 ] .> collapse .> do[collatz_vals.append($)]
                 42 |> collatz ** 100 |> null
+                assert collatz_vals == [21, 64, 32, 16, 8, 4, 2, 1]
+                collatz_vals.clear()
+                42 |> repeat[collatz] |> null
                 assert collatz_vals == [21, 64, 32, 16, 8, 4, 2, 1]
                 """.strip(
                     "\n"
@@ -693,4 +696,25 @@ def test_multi_arg_function_exponentiation():
                     "\n"
                 )
             )
+        )
+
+
+def test_repeat_until():
+    with all_tracers():
+        assert (
+            pyc.eval(
+                textwrap.dedent(
+                    """
+                [42] |> repeat[
+                    until[$[-1] == 1] .> fork[
+                        when[$[-1]%2 == 0] .> $v + [$v[-1]//2],
+                        when[$[-1]%2 == 1] .> $v + [$v[-1]*3 + 1],
+                    ] .> collapse
+                ]
+                """.strip(
+                        "\n"
+                    )
+                )
+            )
+            == [42, 21, 64, 32, 16, 8, 4, 2, 1]
         )
