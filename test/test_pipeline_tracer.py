@@ -708,7 +708,7 @@ def test_repeat_until():
                 [42] |> repeat[
                     until[$[-1] == 1] .> fork[
                         when[$[-1]%2 == 0] .> $v + [$v[-1]//2],
-                        when[$[-1]%2 == 1] .> $v + [$v[-1]*3 + 1],
+                        unless[$[-1]%2 == 0] .> $v + [$v[-1]*3 + 1],
                     ] .> collapse
                 ]
                 """.strip(
@@ -731,7 +731,7 @@ def test_repeat_until_fancy():
                         $,
                         $[-1] |> fork[
                             when[$ % 2 == 0] .> $ // 2,
-                            when[$ % 2 == 1] .> $ * 3 + 1,
+                            unless[$ % 2 == 0] .> $ * 3 + 1,
                         ] |> collapse,
                     ] *.> $ + [$]
                 ]
@@ -742,3 +742,29 @@ def test_repeat_until_fancy():
             )
             == [42, 21, 64, 32, 16, 8, 4, 2, 1]
         )
+
+
+def test_repeat_until_fancy_push_pop_shift():
+    with all_tracers():
+        assert (
+            pyc.eval(
+                textwrap.dedent(
+                    """
+                [42] |> repeat[
+                    until[$[-1] == 1] .> push .> $[-1] .> fork[
+                        when[$ % 2 == 0] .> $ // 2,
+                        unless[$ % 2 == 0] .> $ * 3 + 1,
+                    ] .> collapse .> pop .> lshift *.> $ + [$]
+                ]
+                """.strip(
+                        "\n"
+                    )
+                )
+            )
+            == [42, 21, 64, 32, 16, 8, 4, 2, 1]
+        )
+
+
+def test_read_write():
+    with all_tracers():
+        assert pyc.eval("42 |> write$('x') |> $ + 1 |> read$('x')") == (43, 42)

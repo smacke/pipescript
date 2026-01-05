@@ -45,11 +45,15 @@ def when(func: Callable[[T, *tuple[T]], bool], obj: T, *extra: T) -> T | tuple[T
 
 
 # just like `when` but inverted
+def unless(
+    func: Callable[[T, *tuple[T]], bool], obj: T, *extra: T
+) -> T | tuple[T, ...]:
+    return when(lambda o, *e: not func(o, *e), obj, *extra)
+
+
+# `until` just an alias of `unless`
 def until(func: Callable[[T, *tuple[T]], bool], obj: T, *extra: T) -> T | tuple[T, ...]:
-    if not func(obj, *extra):
-        return obj if len(extra) == 0 else (obj, *extra)
-    else:
-        return pipeline_null  # type: ignore[return-value]
+    return unless(func, obj, *extra)
 
 
 def repeat(func: Callable[[T, *tuple[T]], T], obj: T, *extra: T) -> T | tuple[T, ...]:
@@ -70,4 +74,4 @@ def future(func: Callable[[T, *tuple[T]], R], obj: T, *extra: T) -> Future[R]:
         return executor.submit(func, obj, *extra)
 
 
-__all__ = ["do", "fork", "future", "parallel", "repeat", "until", "when"]
+__all__ = ["do", "fork", "future", "parallel", "repeat", "unless", "until", "when"]

@@ -20,7 +20,18 @@ from pipescript.analysis.placeholders import (
     PlaceholderReplacer,
     SingletonArgCounterMixin,
 )
-from pipescript.api import allow_pipelines_in_loops_and_calls, collapse, null, peek
+from pipescript.api import (
+    allow_pipelines_in_loops_and_calls,
+    collapse,
+    lshift,
+    null,
+    peek,
+    pop,
+    push,
+    read,
+    rshift,
+    write,
+)
 from pipescript.constants import pipeline_null
 from pipescript.patches.traceback_patch import (
     frame_to_node_mapping,
@@ -201,7 +212,18 @@ class PipelineTracer(pyc.BaseTracer):
 
     placeholder_replacer = PlaceholderReplacer(arg_placeholder_spec)
 
-    extra_builtins = [allow_pipelines_in_loops_and_calls, collapse, null, peek]
+    extra_builtins = [
+        allow_pipelines_in_loops_and_calls,
+        collapse,
+        lshift,
+        null,
+        peek,
+        pop,
+        push,
+        read,
+        rshift,
+        write,
+    ]
     assert set(pipescript.api.utils.__all__) <= {eb.__name__ for eb in extra_builtins}
 
     def __init__(self, *args, **kwargs) -> None:

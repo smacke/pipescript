@@ -17,7 +17,16 @@ from pyccolo.trace_events import TraceEvent
 
 import pipescript.api.macros
 from pipescript.analysis.placeholders import SingletonArgCounterMixin
-from pipescript.api.macros import do, fork, future, parallel, repeat, until, when
+from pipescript.api.macros import (
+    do,
+    fork,
+    future,
+    parallel,
+    repeat,
+    unless,
+    until,
+    when,
+)
 from pipescript.tracers.pipeline_tracer import PipelineTracer
 from pipescript.utils import get_user_ns
 
@@ -103,6 +112,7 @@ class MacroTracer(pyc.BaseTracer):
         parallel.__name__: parallel,
         reduce.__name__: reduce,
         repeat.__name__: repeat,
+        unless.__name__: unless,
         until.__name__: until,
         when.__name__: when,
     }

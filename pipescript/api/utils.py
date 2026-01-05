@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from pipescript.constants import pipeline_null
 
@@ -47,4 +47,47 @@ def collapse(results: tuple[T | None, ...]) -> T:
         return filtered_results[0]
 
 
-__all__ = ["allow_pipelines_in_loops_and_calls", "collapse", "null", "peek"]
+stack: list[Any] = []
+
+
+def push(obj: T) -> T:
+    stack.append(obj)
+    return obj
+
+
+def pop(obj: T) -> tuple[T, Any]:
+    return obj, stack.pop()
+
+
+def lshift(obj: tuple[Any, ...]) -> tuple[Any, ...]:
+    return obj[1:] + (obj[0],)
+
+
+def rshift(obj: tuple[Any, ...]) -> tuple[Any, ...]:
+    return (obj[-1],) + obj[:-1]
+
+
+memory: dict[str, Any] = {}
+
+
+def write(key: str, obj: T) -> T:
+    memory[key] = obj
+    return obj
+
+
+def read(key: str, obj: T) -> tuple[T, Any]:
+    return obj, memory[key]
+
+
+__all__ = [
+    "allow_pipelines_in_loops_and_calls",
+    "collapse",
+    "lshift",
+    "null",
+    "peek",
+    "pop",
+    "push",
+    "read",
+    "rshift",
+    "write",
+]
