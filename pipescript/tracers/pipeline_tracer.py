@@ -28,10 +28,8 @@ from pipescript.api import (
     peek,
     pop,
     push,
-    read,
     rshift,
     unnest,
-    write,
 )
 from pipescript.constants import pipeline_null
 from pipescript.patches.traceback_patch import (
@@ -221,9 +219,7 @@ class PipelineTracer(pyc.BaseTracer):
         peek,
         pop,
         push,
-        read,
         rshift,
-        write,
         unnest,
     ]
     assert set(pipescript.api.utils.__all__) <= {eb.__name__ for eb in extra_builtins}

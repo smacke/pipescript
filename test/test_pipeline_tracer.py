@@ -770,6 +770,11 @@ def test_read_write():
         assert pyc.eval("42 |> write$('x') |> $ + 1 |> read$('x')") == (43, 42)
 
 
+def test_read_write_macros():
+    with all_tracers():
+        assert pyc.eval("42 |> write[x] |> $ + 1 |> read[x]") == (43, 42)
+
+
 def test_unnest():
     with all_tracers():
         assert pyc.eval("42 |> push |> push |> pop |> pop |> unnest") == (42, 42, 42)

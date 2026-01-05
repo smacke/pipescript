@@ -74,4 +74,27 @@ def future(func: Callable[[T, *tuple[T]], R], obj: T, *extra: T) -> Future[R]:
         return executor.submit(func, obj, *extra)
 
 
-__all__ = ["do", "fork", "future", "parallel", "repeat", "unless", "until", "when"]
+memory: dict[str, Any] = {}
+
+
+def write(key: str, obj: T) -> T:
+    memory[key] = obj
+    return obj
+
+
+def read(key: str, obj: T) -> tuple[T, Any]:
+    return obj, memory[key]
+
+
+__all__ = [
+    "do",
+    "fork",
+    "future",
+    "parallel",
+    "read",
+    "repeat",
+    "unless",
+    "until",
+    "when",
+    "write",
+]

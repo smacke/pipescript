@@ -14,6 +14,7 @@ import pyccolo as pyc
 from pyccolo import fast
 from pyccolo.stmt_mapper import StatementMapper
 from pyccolo.trace_events import TraceEvent
+from typing_extensions import Literal
 
 import pipescript.api.macros
 from pipescript.analysis.placeholders import SingletonArgCounterMixin
@@ -22,10 +23,12 @@ from pipescript.api.macros import (
     fork,
     future,
     parallel,
+    read,
     repeat,
     unless,
     until,
     when,
+    write,
 )
 from pipescript.tracers.pipeline_tracer import PipelineTracer
 from pipescript.utils import get_user_ns
@@ -110,11 +113,13 @@ class MacroTracer(pyc.BaseTracer):
         map.__name__: map,
         "imap": map,
         parallel.__name__: parallel,
+        read.__name__: read,
         reduce.__name__: reduce,
         repeat.__name__: repeat,
         unless.__name__: unless,
         until.__name__: until,
         when.__name__: when,
+        write.__name__: write,
     }
 
     assert set(pipescript.api.macros.__all__) <= set(macros.keys())
@@ -241,6 +246,18 @@ class MacroTracer(pyc.BaseTracer):
                 )
         return ast_lambda
 
+    @fast.location_of_arg
+    def _handle_read_write_macro(
+        self, func: Literal["read", "write"], macro_body: ast.expr
+    ) -> ast.Lambda:
+        if isinstance(macro_body, ast.Name):
+            macro_body = fast.Str(macro_body.id)
+        arg = f"_{self.arg_replacer.arg_ctr}"
+        self.arg_replacer.arg_ctr += 1
+        lam: ast.Lambda = fast.parse(f"lambda {arg}: {func}(None, {arg})").body[0].value
+        cast(ast.Call, lam.body).args[0] = macro_body
+        return lam
+
     @pyc.before_subscript_slice(when=is_macro, reentrant=True)
     def handle_macro(
         self, _ret, node: ast.Subscript, frame: FrameType, evt: TraceEvent, *_, **__
@@ -287,6 +304,8 @@ class MacroTracer(pyc.BaseTracer):
                     tuple_elts.append(call_node)
                 ast_lambda.body = fast.Tuple(tuple_elts, ctx=load)
                 callable_expr = ast_lambda
+        elif func in (read.__name__, write.__name__):
+            callable_expr = self._handle_read_write_macro(func, node.slice)  # type: ignore[arg-type]
         else:
             callable_expr = self._handle_macro_impl(node.slice, frame, func)
         evaluated_lambda = pyc.eval(callable_expr, frame.f_globals, frame.f_locals)

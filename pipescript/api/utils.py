@@ -71,18 +71,6 @@ def unnest(obj: tuple[tuple[Any, ...], Any]) -> tuple[Any, ...]:
     return obj[0] + (obj[1],)
 
 
-memory: dict[str, Any] = {}
-
-
-def write(key: str, obj: T) -> T:
-    memory[key] = obj
-    return obj
-
-
-def read(key: str, obj: T) -> tuple[T, Any]:
-    return obj, memory[key]
-
-
 __all__ = [
     "allow_pipelines_in_loops_and_calls",
     "collapse",
@@ -91,8 +79,6 @@ __all__ = [
     "peek",
     "pop",
     "push",
-    "read",
     "rshift",
     "unnest",
-    "write",
 ]
