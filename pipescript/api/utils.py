@@ -67,6 +67,10 @@ def rshift(obj: tuple[Any, ...]) -> tuple[Any, ...]:
     return (obj[-1],) + obj[:-1]
 
 
+def unnest(obj: tuple[tuple[Any, ...], Any]) -> tuple[Any, ...]:
+    return obj[0] + (obj[1],)
+
+
 memory: dict[str, Any] = {}
 
 
@@ -89,5 +93,6 @@ __all__ = [
     "push",
     "read",
     "rshift",
+    "unnest",
     "write",
 ]

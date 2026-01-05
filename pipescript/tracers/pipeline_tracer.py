@@ -30,6 +30,7 @@ from pipescript.api import (
     push,
     read,
     rshift,
+    unnest,
     write,
 )
 from pipescript.constants import pipeline_null
@@ -223,6 +224,7 @@ class PipelineTracer(pyc.BaseTracer):
         read,
         rshift,
         write,
+        unnest,
     ]
     assert set(pipescript.api.utils.__all__) <= {eb.__name__ for eb in extra_builtins}
 
