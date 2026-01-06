@@ -78,6 +78,7 @@ class NullishInstrumentationChainChecker(ast.NodeVisitor):
 
 class OptionalChainingTracer(pyc.BaseTracer):
     global_guards_enabled = False
+    allow_reentrant_events = True
 
     class ResolvesToNone:
         def __init__(self, eventually: bool) -> None:
@@ -135,6 +136,7 @@ class OptionalChainingTracer(pyc.BaseTracer):
         when=should_instrument_for_spec(
             {optional_chaining_spec, permissive_attr_dereference_spec}
         ),
+        reentrant=True,
     )
     def handle_before_attr_with_optional_chaining_spec(
         self, obj, node: ast.Attribute, *_, **__
@@ -153,6 +155,7 @@ class OptionalChainingTracer(pyc.BaseTracer):
     @pyc.register_handler(
         pyc.before_call,
         when=should_instrument_for_spec(call_optional_chaining_spec),
+        reentrant=True,
     )
     def handle_before_call_with_call_optional_chaining_spec(self, func, *_, **__):
         if func is None:
@@ -164,6 +167,7 @@ class OptionalChainingTracer(pyc.BaseTracer):
     @pyc.register_raw_handler(
         pyc.before_argument,
         when=should_instrument_for_spec_on_parent(call_optional_chaining_spec),
+        reentrant=True,
     )
     def handle_before_arg_of_func_with_call_optional_chaining_spec(
         self, arg_lambda, *_, **__
@@ -176,11 +180,14 @@ class OptionalChainingTracer(pyc.BaseTracer):
     @pyc.register_raw_handler(
         pyc.after_call,
         when=should_instrument_for_spec(call_optional_chaining_spec),
+        reentrant=True,
     )
     def handle_after_call_with_call_optional_chaining_spec(self, *_, **__):
         self.lexical_call_stack.pop()
 
-    @pyc.register_raw_handler(pyc.after_load_complex_symbol, when=chain_checker)
+    @pyc.register_raw_handler(
+        pyc.after_load_complex_symbol, when=chain_checker, reentrant=True
+    )
     def handle_after_chain_with_optional_specs(self, ret, *_, **__):
         if isinstance(ret, self.ResolvesToNone):
             return pyc.Null
@@ -191,6 +198,7 @@ class OptionalChainingTracer(pyc.BaseTracer):
         pyc.before_boolop,
         when=lambda node: isinstance(node.op, ast.Or)
         and should_instrument_for_spec("nullish_coalescing_spec", attr="values")(node),
+        reentrant=True,
     )
     def before_or_boolop_nullish_coalesce(self, ret, node: ast.BoolOp, *_, **__):
         with self.lexical_nullish_stack.push():
@@ -205,6 +213,7 @@ class OptionalChainingTracer(pyc.BaseTracer):
         pyc.after_boolop,
         when=lambda node: isinstance(node.op, ast.Or)
         and should_instrument_for_spec("nullish_coalescing_spec", attr="values")(node),
+        reentrant=True,
     )
     def after_or_boolop_nullish_coalesce(self, *_, **__):
         self.lexical_nullish_stack.pop()
@@ -224,6 +233,7 @@ class OptionalChainingTracer(pyc.BaseTracer):
         and should_instrument_for_spec_on_parent(
             "nullish_coalescing_spec", attr="values"
         )(node_id),
+        reentrant=True,
     )
     def coalesce_boolop_values(self, ret, node_id: int, *_, is_last: bool, **__):
         if self.cur_boolop_has_nullish_coalescer:
