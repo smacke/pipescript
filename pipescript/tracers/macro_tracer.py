@@ -310,7 +310,8 @@ class MacroTracer(pyc.BaseTracer):
                 ast_lambda.body = fast.Tuple(tuple_elts, ctx=load)
                 callable_expr = ast_lambda
         elif func in (read.__name__, write.__name__):
-            callable_expr = self._handle_read_write_macro(func, node.slice)  # type: ignore[arg-type]
+            rw_lambda = self._handle_read_write_macro(func, node.slice)  # type: ignore[arg-type]
+            callable_expr = cast(ast.expr, rw_lambda)
         else:
             callable_expr = self._handle_macro_impl(node.slice, frame, func)
         evaluated_lambda = pyc.eval(callable_expr, frame.f_globals, frame.f_locals)
