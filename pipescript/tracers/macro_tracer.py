@@ -254,7 +254,12 @@ class MacroTracer(pyc.BaseTracer):
             macro_body = fast.Str(macro_body.id)
         arg = f"_{self.arg_replacer.arg_ctr}"
         self.arg_replacer.arg_ctr += 1
-        lam: ast.Lambda = fast.parse(f"lambda {arg}: {func}(None, {arg})").body[0].value
+        lam: ast.Lambda = cast(
+            ast.Lambda,
+            cast(
+                ast.Expr, fast.parse(f"lambda {arg}: {func}(None, {arg})").body[0]
+            ).value,
+        )
         cast(ast.Call, lam.body).args[0] = macro_body
         return lam
 
