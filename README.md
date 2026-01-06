@@ -550,11 +550,11 @@ Python that is instrumented is fairly similar visually to pipescript syntax,
 various Jupyter ergonomical features like readable stack traces and jedi-based
 autocomplete can continue to function as normal (for the most part).
 
-Implementation-wise, thanks to pyccolo's heavy lifting, I was able to implement
-the initial release of pipescript entirely over the course of time off during the
-2025 holiday season. At the time of this writing, pipescript occupies fewer than
-2000 lines of code (excluding tests), each of which was produced *without* the
-help of any AI agents.
+Implementation-wise, thanks to pyccolo's heavy lifting, I was able to write the
+initial release of pipescript entirely over the course of time off during the
+2025 holiday season. At the time of this writing, pipescript occupies about 2000
+lines of code (excluding tests), each of which was produced *without* the help
+of any AI agents.
 
 ## Inspiration
 
@@ -566,7 +566,7 @@ fill some of Python's pipe and functional programming gaps with elegant APIs.
 
 ## Disclaimer
 
-**Warning: use pipescript at your own risk!**. It is very much not guaranteed to
+**Warning: use pipescript at your own risk!** It is very much not guaranteed to
 be bug-free -- I implemented it in a hurry before it was time to go back to work.
 
 ## License
