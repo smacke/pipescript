@@ -86,10 +86,23 @@ def read(key: str, obj: T) -> tuple[T, Any]:
     return obj, memory[key]
 
 
+_ntimes_counters: dict[int, int] = {}
+
+
+def ntimes(obj: T, callpoint_id: int) -> T:
+    ctr = _ntimes_counters[callpoint_id]
+    if ctr <= 0:
+        return pipeline_null  # type: ignore[return-value]
+    ctr -= 1
+    _ntimes_counters[callpoint_id] = ctr
+    return obj
+
+
 __all__ = [
     "do",
     "fork",
     "future",
+    "ntimes",
     "parallel",
     "read",
     "repeat",

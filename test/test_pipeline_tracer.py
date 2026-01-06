@@ -765,6 +765,15 @@ def test_repeat_until_fancy_push_pop_shift():
         )
 
 
+def test_repeat_ntimes():
+    with all_tracers():
+        assert pyc.eval("[] |> repeat[ntimes[5] .> do[$.append(42)]]") == [42] * 5
+        assert pyc.eval("[] |> repeat[ntimes[2 + 2] .> do[$.append(42)]]") == [42] * 4
+        assert (
+            pyc.eval("[] |> repeat[ntimes[2 |> $ + 5] .> do[$.append(42)]]") == [42] * 7
+        )
+
+
 def test_read_write():
     with all_tracers():
         assert pyc.eval("42 |> write$('x') |> $ + 1 |> read$('x')") == (43, 42)

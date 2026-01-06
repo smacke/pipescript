@@ -19,9 +19,11 @@ from typing_extensions import Literal
 import pipescript.api.macros
 from pipescript.analysis.placeholders import SingletonArgCounterMixin
 from pipescript.api.macros import (
+    _ntimes_counters,
     do,
     fork,
     future,
+    ntimes,
     parallel,
     read,
     repeat,
@@ -112,6 +114,7 @@ class MacroTracer(pyc.BaseTracer):
         "ifilter": filter,
         map.__name__: map,
         "imap": map,
+        ntimes.__name__: ntimes,
         parallel.__name__: parallel,
         read.__name__: read,
         reduce.__name__: reduce,
@@ -263,6 +266,31 @@ class MacroTracer(pyc.BaseTracer):
         cast(ast.Call, lam.body).args[0] = macro_body
         return lam
 
+    @fast.location_of_arg
+    def _handle_ntimes_macro(
+        self, frame: FrameType, macro_body: ast.expr
+    ) -> ast.Lambda:
+        callpoint_id = id(macro_body)
+        if callpoint_id not in _ntimes_counters:
+            if isinstance(macro_body, ast.Constant) and isinstance(
+                macro_body.value, int
+            ):
+                ctr = macro_body.value
+            else:
+                ctr = pyc.eval(macro_body, frame.f_globals, frame.f_locals)
+            _ntimes_counters[callpoint_id] = ctr
+        arg = f"_{self.arg_replacer.arg_ctr}"
+        self.arg_replacer.arg_ctr += 1
+        lam: ast.Lambda = cast(
+            ast.Lambda,
+            cast(
+                ast.Expr,
+                fast.parse(f"lambda {arg}: {ntimes.__name__}({arg}, None)").body[0],
+            ).value,
+        )
+        cast(ast.Call, lam.body).args[1] = fast.Constant(value=callpoint_id)
+        return lam
+
     @pyc.before_subscript_slice(when=is_macro, reentrant=True)
     def handle_macro(
         self, _ret, node: ast.Subscript, frame: FrameType, evt: TraceEvent, *_, **__
@@ -312,6 +340,8 @@ class MacroTracer(pyc.BaseTracer):
         elif func in (read.__name__, write.__name__):
             rw_lambda = self._handle_read_write_macro(func, node.slice)  # type: ignore[arg-type]
             callable_expr = cast(ast.expr, rw_lambda)
+        elif func == ntimes.__name__:
+            callable_expr = self._handle_ntimes_macro(frame, node.slice)  # type: ignore[arg-type]
         else:
             callable_expr = self._handle_macro_impl(node.slice, frame, func)
         evaluated_lambda = pyc.eval(callable_expr, frame.f_globals, frame.f_locals)
