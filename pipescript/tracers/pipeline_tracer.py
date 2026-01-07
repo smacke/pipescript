@@ -20,7 +20,17 @@ from pipescript.analysis.placeholders import (
     PlaceholderReplacer,
     SingletonArgCounterMixin,
 )
-from pipescript.api.utils import collapse, lshift, null, peek, pop, push, rshift, unnest
+from pipescript.api.utils import (
+    collapse,
+    lshift,
+    null,
+    peek,
+    pop,
+    push,
+    replace,
+    rshift,
+    unnest,
+)
 from pipescript.constants import pipeline_null
 from pipescript.patches.traceback_patch import (
     frame_to_node_mapping,
@@ -224,6 +234,7 @@ class PipelineTracer(pyc.BaseTracer):
         peek,
         pop,
         push,
+        replace,
         rshift,
         unnest,
     ]

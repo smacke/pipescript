@@ -850,3 +850,9 @@ def test_context_and_expect():
                 )
             )
         )
+
+
+def test_replace():
+    with all_tracers():
+        assert pyc.eval("42 |> replace(0)") == 0
+        assert pyc.eval("0 |> replace(42)") == 42

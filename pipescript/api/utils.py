@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, TypeVar
+from typing import Any, Callable, TypeVar
 
 from pipescript.constants import pipeline_null
 
@@ -58,6 +58,13 @@ def unnest(obj: tuple[tuple[Any, ...], Any]) -> tuple[Any, ...]:
     return obj[0] + (obj[1],)
 
 
+def replace(newval: T) -> Callable[..., T]:
+    def __ignore(*_, **__) -> T:
+        return newval
+
+    return __ignore
+
+
 __all__ = [
     "collapse",
     "lshift",
@@ -65,6 +72,7 @@ __all__ = [
     "peek",
     "pop",
     "push",
+    "replace",
     "rshift",
     "unnest",
 ]
