@@ -43,7 +43,7 @@ def test_value_first_partial_tuple_apply_then_apply():
 
 def test_value_first_partial_tuple_apply_then_apply_quick_lambda():
     with all_tracers():
-        assert pyc.eval("(1, 2) *$> f[_ + _ + _] <| 3") == 6
+        assert pyc.eval("(1, 2) *$> f[$ + $ + $] <| 3") == 6
 
 
 def test_function_first_partial_apply_then_apply():
@@ -58,7 +58,7 @@ def test_function_first_partial_tuple_apply_then_apply():
 
 def test_function_first_partial_tuple_apply_then_apply_quick_lambda():
     with all_tracers():
-        assert pyc.eval("f[_ + _ + _] <$* (1, 2) <| 3") == 6
+        assert pyc.eval("f[$ + $ + $] <$* (1, 2) <| 3") == 6
 
 
 def test_pipe_into_value_first_partial_apply():
@@ -73,13 +73,13 @@ def test_pipe_into_function_first_partial_apply():
 
 def test_simple_pipeline_with_quick_lambda_map():
     with all_tracers():
-        assert pyc.eval("(1, 2, 3) |> f[map(f[_ + 1], _)] |> list") == [2, 3, 4]
+        assert pyc.eval("(1, 2, 3) |> f[map(f[$ + 1], $)] |> list") == [2, 3, 4]
 
 
 def test_pipeline_assignment():
     with all_tracers():
         assert pyc.eval(
-            "(1, 2, 3) |> list |>> result |> f[map(f[_ + 1], _)] |> list |> f[result + _]"
+            "(1, 2, 3) |> list |>> result |> f[map(f[$ + 1], $)] |> list |> f[result + $]"
         ) == [1, 2, 3, 2, 3, 4]
 
 
@@ -127,18 +127,18 @@ def test_compose_op_extra_space():
 
 def test_compose_op_with_parenthesized_quick_lambdas():
     with all_tracers():
-        assert pyc.eval("((f[_ * 5]) <. (f[_ + 2]))(10)") == 60
+        assert pyc.eval("((f[$ * 5]) <. (f[$ + 2]))(10)") == 60
 
 
 def test_compose_op_with_quick_lambdas():
     with all_tracers():
-        assert pyc.eval("(f[_ * 5] <. f[_ + 2])(10)") == 60
+        assert pyc.eval("(f[$ * 5] <. f[$ + 2])(10)") == 60
 
 
 def test_pipeline_inside_quick_lambda():
     with all_tracers():
         assert pyc.eval("2 |> f[$ |> $ + 2]") == 4
-        assert pyc.eval("2 |> f[$ |> f[_ + 2]]") == 4
+        assert pyc.eval("2 |> f[$ |> f[$ + 2]]") == 4
 
 
 def test_pipeline_dot_op_with_optional_chain():

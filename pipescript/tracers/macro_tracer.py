@@ -51,17 +51,15 @@ class _ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
 
     def visit_Name(self, node: ast.Name) -> None:
         if (
-            node.id != "_"
-            and id(node)
+            id(node)
             not in PipelineTracer.augmented_node_ids_by_spec[
                 PipelineTracer.arg_placeholder_spec
             ]
         ):
             return
-        # quick lambda will interpret this node as placeholder without any aug spec necessary
         PipelineTracer.augmented_node_ids_by_spec[
             PipelineTracer.arg_placeholder_spec
-        ].discard(id(node))
+        ].remove(id(node))
         assert node.id.startswith("_")
         if node.id == "_":
             node.id = f"_{self.arg_ctr}"
