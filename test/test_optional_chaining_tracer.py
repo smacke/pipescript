@@ -5,7 +5,6 @@ import textwrap
 import pyccolo as pyc
 
 from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
-from pipescript.tracers.pipeline_tracer import PipelineTracer
 
 
 def test_optional_chaining_simple():
@@ -64,10 +63,8 @@ def test_permissive_attr_vs_optional_attr_qualifier():
 
 
 def test_call_on_optional():
-    # TODO: we are relying on PipelineTracer to populate AST bookkeeping. This should be fixed.
-    with PipelineTracer:
-        with OptionalChainingTracer:
-            pyc.exec("foo = None; assert foo?.() is None")
+    with OptionalChainingTracer:
+        pyc.exec("foo = None; assert foo?.() is None")
 
 
 def test_nullish_coalescing():
