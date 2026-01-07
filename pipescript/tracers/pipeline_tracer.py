@@ -78,6 +78,7 @@ def partial_call_currier(func: Callable[..., Any]) -> Callable[..., Any]:
     def make_curried_caller(*curried_args, **curried_kwargs):
         @functools.wraps(func)
         def wrapped_with_curried(*args, **kwargs):
+            __hide_pyccolo_frame__ = True  # noqa: F841
             return func(*curried_args, *args, **curried_kwargs, **kwargs)
 
         return wrapped_with_curried

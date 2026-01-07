@@ -743,6 +743,14 @@ def test_repeat_until_fancy():
         )
 
 
+def test_shift():
+    with all_tracers():
+        assert pyc.eval("(1, 2, 3) |> lshift") == (2, 3, 1)
+        assert pyc.eval("(1, 2, 3) |> rshift") == (3, 1, 2)
+        assert pyc.eval("(1, 2, 3) |> fork[rshift .> rshift, lshift] *|> ($ == $)")
+        assert pyc.eval("(1, 2, 3) |> fork[lshift .> lshift, rshift] *|> ($ == $)")
+
+
 def test_repeat_until_fancy_push_pop_shift():
     with all_tracers():
         assert (
