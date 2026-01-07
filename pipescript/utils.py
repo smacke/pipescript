@@ -5,8 +5,6 @@ from typing import Any
 
 import pyccolo as pyc
 
-from pipescript.api import allow_pipelines_in_loops_and_calls
-
 
 # for unittest.mock patching
 def _get_user_ns_impl() -> dict[str, Any] | None:
@@ -41,34 +39,3 @@ def has_augmentations(
     elif not isinstance(expected_augs, set):
         expected_augs = {expected_augs}
     return bool(actual_augs & expected_augs)
-
-
-def is_outer_or_allowlisted(node_or_id: ast.AST | int) -> bool:
-    node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
-    if pyc.is_outer_stmt(node_id):
-        return True
-    containing_stmt = pyc.BaseTracer.containing_stmt_by_id.get(node_id)
-    parent_stmt = pyc.BaseTracer.parent_stmt_by_id.get(
-        node_id if containing_stmt is None else id(containing_stmt)
-    )
-    while parent_stmt is not None:
-        if isinstance(parent_stmt, ast.With):
-            context_expr = parent_stmt.items[0].context_expr
-            if (
-                isinstance(context_expr, ast.Call)
-                and isinstance(context_expr.func, ast.Name)
-                and context_expr.func.id == allow_pipelines_in_loops_and_calls.__name__
-            ):
-                return True
-        elif isinstance(parent_stmt, (ast.AsyncFunctionDef, ast.FunctionDef)):
-            for deco in parent_stmt.decorator_list:
-                if isinstance(deco, ast.Name):
-                    actual_deco = deco
-                elif isinstance(deco, ast.Call) and isinstance(deco.func, ast.Name):
-                    actual_deco = deco.func
-                else:
-                    continue
-                if actual_deco.id == allow_pipelines_in_loops_and_calls.__name__:
-                    return True
-        parent_stmt = pyc.BaseTracer.parent_stmt_by_id.get(id(parent_stmt))
-    return False

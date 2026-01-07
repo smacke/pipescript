@@ -20,24 +20,14 @@ from pipescript.analysis.placeholders import (
     PlaceholderReplacer,
     SingletonArgCounterMixin,
 )
-from pipescript.api.utils import (
-    allow_pipelines_in_loops_and_calls,
-    collapse,
-    lshift,
-    null,
-    peek,
-    pop,
-    push,
-    rshift,
-    unnest,
-)
+from pipescript.api.utils import collapse, lshift, null, peek, pop, push, rshift, unnest
 from pipescript.constants import pipeline_null
 from pipescript.patches.traceback_patch import (
     frame_to_node_mapping,
     patch_find_node_ipython,
 )
 from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
-from pipescript.utils import get_user_ns, has_augmentations, is_outer_or_allowlisted
+from pipescript.utils import get_user_ns, has_augmentations
 
 
 def node_is_pipeline_bitor_op(
@@ -55,9 +45,32 @@ def parent_is_pipeline_bitor_op(node_or_id: ast.expr | int) -> bool:
     return node_is_pipeline_bitor_op(parent)
 
 
+def node_is_function_power_op(node: ast.AST | None) -> bool:
+    if not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Pow):
+        return False
+    return has_augmentations(node, expected_augs=PipelineTracer.function_power_op_spec)
+
+
 def is_partial_call(node: ast.Call) -> bool:
     return PipelineTracer.partial_call_spec in PipelineTracer.get_augmentations(
         id(node)
+    )
+
+
+def is_chain_with_placeholders(node_or_id: ast.AST | int) -> bool:
+    node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
+    node = pyc.BaseTracer.ast_node_by_id.get(node_id)
+    if node is None:
+        return False
+    while True:
+        containing_node = pyc.BaseTracer.containing_ast_by_id.get(node_id)
+        if node is containing_node or not isinstance(
+            containing_node, (ast.Call, ast.Attribute, ast.Subscript)
+        ):
+            break
+        node = containing_node
+    return PipelineTracer.placeholder_replacer.search(
+        node, allow_top_level=True, check_all_calls=False
     )
 
 
@@ -156,40 +169,32 @@ class PipelineTracer(pyc.BaseTracer):
         aug_type=pyc.AugmentationType.binop, token="<?", replacement="|"
     )
 
-    left_compose_dict_op_spec = pyc.AugmentationSpec(
+    forward_compose_dict_op_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.binop, token="**.>", replacement="|"
     )
 
-    left_compose_tuple_op_spec = pyc.AugmentationSpec(
+    forward_compose_tuple_op_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.binop, token="*.>", replacement="|"
     )
 
-    left_compose_op_spec = pyc.AugmentationSpec(
+    forward_compose_op_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.binop, token=".>", replacement="|"
     )
 
-    alt_compose_dict_op_spec = pyc.AugmentationSpec(
+    compose_dict_op_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.binop, token="<.**", replacement="|"
     )
 
-    alt_compose_tuple_op_spec = pyc.AugmentationSpec(
+    compose_tuple_op_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.binop, token="<.*", replacement="|"
     )
 
-    alt_compose_op_spec = pyc.AugmentationSpec(
+    compose_op_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.binop, token="<.", replacement="|"
     )
 
-    compose_dict_op_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.binop, token=".** ", replacement="| "
-    )
-
-    compose_tuple_op_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.binop, token=".* ", replacement="| "
-    )
-
-    compose_op_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.binop, token=". ", replacement="| "
+    function_power_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.binop, token=".**", replacement="**"
     )
 
     # just prevents partial call spec from taking effect when it shouldn't
@@ -212,7 +217,6 @@ class PipelineTracer(pyc.BaseTracer):
     placeholder_replacer = PlaceholderReplacer(arg_placeholder_spec)
 
     extra_builtins = [
-        allow_pipelines_in_loops_and_calls,
         collapse,
         lshift,
         null,
@@ -264,7 +268,7 @@ class PipelineTracer(pyc.BaseTracer):
         return partial_call_currier(ret)
 
     @pyc.register_handler(
-        pyc.before_load_complex_symbol, when=is_outer_or_allowlisted, reentrant=True
+        pyc.before_load_complex_symbol, when=is_chain_with_placeholders, reentrant=True
     )
     def handle_chain_placeholder_rewrites(
         self, ret, node: ast.expr, frame: FrameType, *_, **__
@@ -323,7 +327,7 @@ class PipelineTracer(pyc.BaseTracer):
         return lambda: OptionalChainingTracer.resolves_to_none_eventually
 
     @pyc.register_raw_handler(
-        pyc.before_argument, when=is_outer_or_allowlisted, reentrant=True
+        pyc.before_argument, when=is_chain_with_placeholders, reentrant=True
     )
     def handle_before_arg(self, ret: object, *_, **__):
         if self.cur_chain_placeholder_lambda:
@@ -333,7 +337,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     @pyc.register_raw_handler(
         pyc.after_load_complex_symbol,
-        when=is_outer_or_allowlisted,
+        when=is_chain_with_placeholders,
         reentrant=True,
     )
     def handle_after_placeholder_chain(self, ret, *_, **__):
@@ -358,8 +362,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     @pyc.register_raw_handler(
         (pyc.before_left_binop_arg, pyc.before_right_binop_arg),
-        when=lambda node: parent_is_pipeline_bitor_op(node)
-        and is_outer_or_allowlisted(node),
+        when=parent_is_pipeline_bitor_op,
         reentrant=True,
     )
     def maybe_skip_binop_arg(self, ret: object, node_id: int, *_, **__):
@@ -421,8 +424,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     @pyc.register_handler(
         pyc.before_right_binop_arg,
-        when=lambda node: parent_is_pipeline_bitor_op(node)
-        and is_outer_or_allowlisted(node),
+        when=parent_is_pipeline_bitor_op,
         reentrant=True,
     )
     def transform_pipeline_rhs_placeholders(
@@ -466,9 +468,9 @@ class PipelineTracer(pyc.BaseTracer):
                     cls.value_first_left_partial_apply_op_spec,
                     cls.value_first_left_partial_apply_tuple_op_spec,
                     cls.value_first_left_partial_apply_dict_op_spec,
-                    cls.left_compose_op_spec,
-                    cls.left_compose_tuple_op_spec,
-                    cls.left_compose_dict_op_spec,
+                    cls.forward_compose_op_spec,
+                    cls.forward_compose_tuple_op_spec,
+                    cls.forward_compose_dict_op_spec,
                 },
             ):
                 return -1
@@ -480,9 +482,9 @@ class PipelineTracer(pyc.BaseTracer):
         if node_is_pipeline_bitor_op(
             parent,
             allowlisted_augmentations={
-                cls.left_compose_op_spec,
-                cls.left_compose_tuple_op_spec,
-                cls.left_compose_dict_op_spec,
+                cls.forward_compose_op_spec,
+                cls.forward_compose_tuple_op_spec,
+                cls.forward_compose_dict_op_spec,
             },
         ):
             # don't create lambdas if the leftmost pipeline op is a composition operator
@@ -496,8 +498,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     @pyc.register_handler(
         pyc.before_binop,
-        when=lambda node: node_is_pipeline_bitor_op(node)
-        and is_outer_or_allowlisted(node),
+        when=node_is_pipeline_bitor_op,
         reentrant=True,
     )
     def transform_pipeline_lhs_placeholders(
@@ -530,8 +531,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     @pyc.register_handler(
         pyc.before_binop,
-        when=lambda node: node_is_pipeline_bitor_op(node)
-        and is_outer_or_allowlisted(node),
+        when=node_is_pipeline_bitor_op,
         reentrant=True,
     )
     def transform_pipeline_apply_ops(
@@ -700,8 +700,7 @@ class PipelineTracer(pyc.BaseTracer):
     @pyc.register_handler(
         pyc.after_binop,
         when=lambda node: node_is_pipeline_bitor_op(node)
-        and not parent_is_pipeline_bitor_op(node)
-        and is_outer_or_allowlisted(node),
+        and not parent_is_pipeline_bitor_op(node),
         reentrant=True,
     )
     def coalesce_pipeline_null(self, ret, *_, **__):
@@ -712,8 +711,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     @pyc.register_handler(
         pyc.before_binop,
-        when=lambda node: node_is_pipeline_bitor_op(node)
-        and is_outer_or_allowlisted(node),
+        when=node_is_pipeline_bitor_op,
         reentrant=True,
     )
     def transform_pipeline_compose_ops(
@@ -725,7 +723,7 @@ class PipelineTracer(pyc.BaseTracer):
         __hide_pyccolo_frame__ = True
         frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node.left
         this_node_augmentations = self.get_augmentations(id(node))
-        if {self.compose_op_spec, self.alt_compose_op_spec} & this_node_augmentations:
+        if {self.compose_op_spec, self.compose_op_spec} & this_node_augmentations:
 
             def __pipeline_compose(f, g):
                 def __composed(*args, **kwargs):
@@ -741,7 +739,7 @@ class PipelineTracer(pyc.BaseTracer):
             return __pipeline_compose
         elif {
             self.compose_tuple_op_spec,
-            self.alt_compose_tuple_op_spec,
+            self.compose_tuple_op_spec,
         } & this_node_augmentations:
 
             def __pipeline_tuple_compose(f, g):
@@ -758,7 +756,7 @@ class PipelineTracer(pyc.BaseTracer):
             return __pipeline_tuple_compose
         elif {
             self.compose_dict_op_spec,
-            self.alt_compose_dict_op_spec,
+            self.compose_dict_op_spec,
         } & this_node_augmentations:
 
             def __pipeline_dict_compose(f, g):
@@ -773,7 +771,7 @@ class PipelineTracer(pyc.BaseTracer):
                 return __tuple_composed
 
             return __pipeline_dict_compose
-        elif self.left_compose_op_spec in this_node_augmentations:
+        elif self.forward_compose_op_spec in this_node_augmentations:
 
             def __left_pipeline_compose(f, g):
                 def __composed(*args, **kwargs):
@@ -787,7 +785,7 @@ class PipelineTracer(pyc.BaseTracer):
                 return __composed
 
             return __left_pipeline_compose
-        elif self.left_compose_tuple_op_spec in this_node_augmentations:
+        elif self.forward_compose_tuple_op_spec in this_node_augmentations:
 
             def __left_pipeline_tuple_compose(f, g):
                 def __tuple_composed(*args, **kwargs):
@@ -801,7 +799,7 @@ class PipelineTracer(pyc.BaseTracer):
                 return __tuple_composed
 
             return __left_pipeline_tuple_compose
-        elif self.left_compose_dict_op_spec in this_node_augmentations:
+        elif self.forward_compose_dict_op_spec in this_node_augmentations:
 
             def __left_pipeline_dict_compose(f, g):
                 def __tuple_composed(*args, **kwargs):
@@ -820,9 +818,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     @pyc.register_handler(
         pyc.before_binop,
-        when=lambda node: isinstance(node, ast.BinOp)
-        and isinstance(node.op, ast.Pow)
-        and is_outer_or_allowlisted(node),
+        when=node_is_function_power_op,
         reentrant=True,
     )
     def exponentiate_functions(self, ret, *_, **__):

@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 import pyccolo as pyc
 
-from pipescript.utils import has_augmentations, is_outer_or_allowlisted
+from pipescript.utils import has_augmentations
 
 
 def parent_is_or_boolop(node_id: int) -> bool:
@@ -20,9 +20,7 @@ def should_instrument_for_spec(
     if isinstance(spec, str):
         spec = getattr(OptionalChainingTracer, spec)
     assert not isinstance(spec, str)
-    return lambda node: is_outer_or_allowlisted(node) and has_augmentations(
-        getattr(node, attr or "", node), spec
-    )
+    return lambda node: has_augmentations(getattr(node, attr or "", node), spec)
 
 
 def should_instrument_for_spec_on_parent(
@@ -36,7 +34,7 @@ def should_instrument_for_spec_on_parent(
     def should_instrument(node_or_id: ast.AST | int) -> bool:
         node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
         parent = pyc.BaseTracer.containing_ast_by_id.get(node_id)
-        if parent is None or not is_outer_or_allowlisted(parent):
+        if parent is None:
             return False
         return has_augmentations(getattr(parent, attr or "", parent), spec)
 
@@ -48,8 +46,6 @@ class NullishInstrumentationChainChecker(ast.NodeVisitor):
         self._contains_nullish_instrumentation = False
 
     def __call__(self, node_id: int) -> bool:
-        if not is_outer_or_allowlisted(node_id):
-            return False
         node = pyc.BaseTracer.ast_node_by_id.get(node_id)
         if node is None:
             return False

@@ -105,34 +105,34 @@ def test_right_tuple_apply():
 
 def test_compose_op():
     with all_tracers():
-        assert pyc.eval("((lambda x: x * 5) . (lambda x: x + 2))(10)") == 60
+        assert pyc.eval("((lambda x: x * 5) <. (lambda x: x + 2))(10)") == 60
 
 
 def test_tuple_compose_op():
     with all_tracers():
         assert (
-            pyc.eval("((lambda x, y: x * 5 + y) .* (lambda x: (x, x + 2)))(10)") == 62
+            pyc.eval("((lambda x, y: x * 5 + y) <.* (lambda x: (x, x + 2)))(10)") == 62
         )
 
 
 def test_compose_op_no_space():
     with all_tracers():
-        assert pyc.eval("((lambda x: x * 5). (lambda x: x + 2))(10)") == 60
+        assert pyc.eval("((lambda x: x * 5)<. (lambda x: x + 2))(10)") == 60
 
 
 def test_compose_op_extra_space():
     with all_tracers():
-        assert pyc.eval("((lambda x: x * 5)  . (lambda x: x + 2))(10)") == 60
+        assert pyc.eval("((lambda x: x * 5)  <. (lambda x: x + 2))(10)") == 60
 
 
 def test_compose_op_with_parenthesized_quick_lambdas():
     with all_tracers():
-        assert pyc.eval("((f[_ * 5]) . (f[_ + 2]))(10)") == 60
+        assert pyc.eval("((f[_ * 5]) <. (f[_ + 2]))(10)") == 60
 
 
 def test_compose_op_with_quick_lambdas():
     with all_tracers():
-        assert pyc.eval("(f[_ * 5] . f[_ + 2])(10)") == 60
+        assert pyc.eval("(f[_ * 5] <. f[_ + 2])(10)") == 60
 
 
 def test_pipeline_inside_quick_lambda():
@@ -144,7 +144,7 @@ def test_pipeline_inside_quick_lambda():
 def test_pipeline_dot_op_with_optional_chain():
     with all_tracers():
         assert (
-            pyc.eval("(3, 1, 2) |> (list . reversed . sorted) |> $.index(2).?foo")
+            pyc.eval("(3, 1, 2) |> (list <. reversed <. sorted) |> $.index(2).?foo")
             is None
         )
 
@@ -249,7 +249,11 @@ def test_dict_operators():
             "c": 3,
             "d": 4,
         }
-        assert pyc.eval("[('a',1), ('b', 2)] |> (list . dict .** dict)") == [
+        assert pyc.eval("[('a',1), ('b', 2)] |> (list <. dict <.** dict)") == [
+            "a",
+            "b",
+        ]
+        assert pyc.eval("[('a',1), ('b', 2)] |> (dict **.> dict .> list)") == [
             "a",
             "b",
         ]
@@ -393,7 +397,7 @@ def test_partial_calls():
         assert pyc.eval("[2, 3, 4] |> reduce[$ * $]$($, 2)()") == 48
 
 
-def test_left_function_composition():
+def test_forward_function_composition():
     with all_tracers():
         assert pyc.eval("([1], [2], [3, 4]) |> (list .> sum($, start=[]))") == [
             1,
@@ -401,7 +405,7 @@ def test_left_function_composition():
             3,
             4,
         ]
-        assert pyc.eval("([1], [2], [3, 4]) |> (sum($, start=[]) . list)") == [
+        assert pyc.eval("([1], [2], [3, 4]) |> (sum($, start=[]) <. list)") == [
             1,
             2,
             3,
@@ -412,7 +416,7 @@ def test_left_function_composition():
         ) == [[1, 3, 5], [2, 4, 6]]
 
 
-def test_alt_compose():
+def test_backward_compose_pipeline():
     with all_tracers():
         assert pyc.eval("sum($, start=[]) <. list <| ([1], [2], [3, 4])") == [
             1,
@@ -463,27 +467,11 @@ def test_placeholder_scope_within_pipeline_step():
 
 def test_loop_pipelines():
     with all_tracers():
-        try:
-            pyc.exec(
-                textwrap.dedent(
-                    """
-                    for _ in range(10):
-                        assert 1 |> $ + 1 == 2
-                    """
-                ).strip("\n")
-            )
-        except Exception:
-            pass
-        else:
-            assert False, "this should have thrown"
-
-        # OK to run this when looped pipelines are allowed
         pyc.exec(
             textwrap.dedent(
                 """
-                with allow_pipelines_in_loops_and_calls():
-                    for _ in range(10):
-                        assert 1 |> $ + 1 == 2
+                for _ in range(10):
+                    assert 1 |> $ + 1 == 2
                 """
             ).strip("\n")
         )
@@ -491,42 +479,12 @@ def test_loop_pipelines():
 
 def test_function_pipelines():
     with all_tracers():
-        try:
-            pyc.exec(
-                textwrap.dedent(
-                    """
-                    def function_with_pipeline():
-                        return 1 |> $ + 1
-                        
-                    assert function_with_pipeline() == 2
-                    """
-                ).strip("\n")
-            )
-        except Exception:
-            pass
-        else:
-            assert False, "this should have thrown"
-
-        # OK to run this when functions with pipelines are allowed
         pyc.exec(
             textwrap.dedent(
                 """
-                @allow_pipelines_in_loops_and_calls
                 def function_with_pipeline():
                     return 1 |> $ + 1
                     
-                assert function_with_pipeline() == 2
-                """
-            ).strip("\n")
-        )
-
-        pyc.exec(
-            textwrap.dedent(
-                """
-                @allow_pipelines_in_loops_and_calls()
-                def function_with_pipeline():
-                    return 1 |> $ + 1
-
                 assert function_with_pipeline() == 2
                 """
             ).strip("\n")
@@ -662,7 +620,7 @@ def test_function_exponentiation_and_repeat():
                     when[$ % 2 == 0] .> $ // 2,
                     when[$ % 2 == 1] .> $ * 3 + 1,
                 ] .> collapse .> do[collatz_vals.append($)]
-                42 |> collatz ** 100 |> null
+                42 |> collatz .** 100 |> null
                 assert collatz_vals == [21, 64, 32, 16, 8, 4, 2, 1]
                 collatz_vals.clear()
                 42 |> repeat[collatz] |> null
@@ -672,10 +630,10 @@ def test_function_exponentiation_and_repeat():
                 )
             )
         )
-        assert pyc.eval("($ |> $ + 1) ** 3 <| 1") == 4
-        assert pyc.eval("1 |> ($ |> $ + 1) ** 3") == 4
-        assert pyc.eval("f[$ + $]($, 1) ** 3 <| 1") == 4
-        assert pyc.eval("1 |> f[f[$ + $]($, 1)] ** 3") == 4
+        assert pyc.eval("($ |> $ + 1) .** 3 <| 1") == 4
+        assert pyc.eval("1 |> ($ |> $ + 1) .** 3") == 4
+        assert pyc.eval("f[$ + $]($, 1) .** 3 <| 1") == 4
+        assert pyc.eval("1 |> f[f[$ + $]($, 1)] .** 3") == 4
 
 
 def test_multi_arg_function_exponentiation():
@@ -686,12 +644,12 @@ def test_multi_arg_function_exponentiation():
                 def square(v1, v2, v3):
                     return v1**2, v2**2, v3**2
                     
-                assert (1, 2, 3) *|> square ** 2 == (1, 16, 81)
+                assert (1, 2, 3) *|> square .** 2 == (1, 16, 81)
                 
                 def triple(*args):
                     return tuple(3*v for v in args)
                     
-                assert (1, 2, 3) *|> triple ** 2 == (9, 18, 27)
+                assert (1, 2, 3) *|> triple .** 2 == (9, 18, 27)
                 """.strip(
                     "\n"
                 )

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 from typing import Any, TypeVar
 
 from pipescript.constants import pipeline_null
@@ -10,18 +9,6 @@ T = TypeVar("T")
 
 # allow-listed print function that won't cause the no-prints check to fail
 print_ = print
-
-
-def allow_pipelines_in_loops_and_calls(func=None):
-    if func is None or not callable(func):
-
-        @contextmanager
-        def nothing():
-            yield
-
-        return nothing()
-    else:
-        return func
 
 
 def null(*_, **__) -> None:
@@ -72,7 +59,6 @@ def unnest(obj: tuple[tuple[Any, ...], Any]) -> tuple[Any, ...]:
 
 
 __all__ = [
-    "allow_pipelines_in_loops_and_calls",
     "collapse",
     "lshift",
     "null",
