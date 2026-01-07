@@ -905,3 +905,17 @@ def test_memoize():
                 )
             )
         )
+
+
+def test_recursion():
+    with all_tracers():
+        pyc.exec(
+            textwrap.dedent(
+                """
+                fact = $ |> fork[when[$ <= 1] .> replace(1), when[$ > 1] .> $v * fact($v-1)] |> collapse
+                
+                assert fact(3) == 6
+                assert fact(4) == 24
+                """
+            )
+        )

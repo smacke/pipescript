@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from typing import Any, Callable, TypeVar
+import functools
+from types import FrameType
+from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
+from pipescript.analysis.placeholders import FreeVarTransformer
 from pipescript.constants import pipeline_null
 
 T = TypeVar("T")
@@ -9,6 +12,20 @@ T = TypeVar("T")
 
 # allow-listed print function that won't cause the no-prints check to fail
 print_ = print
+
+
+if TYPE_CHECKING:
+    _dynamic_lookup: Callable[[str, int], Any]
+else:
+
+    @functools.cache
+    def _dynamic_lookup(name: str, frame_id: int) -> Any:
+        frame: FrameType | None = FreeVarTransformer.frame_cache.get(frame_id)
+        while frame is not None and name not in frame.f_locals:
+            frame = frame.f_back
+        if frame is None:
+            raise NameError("Undefined name '%s'" % name)
+        return frame.f_locals[name]
 
 
 def null(*_, **__) -> None:

@@ -1,14 +1,37 @@
 from __future__ import annotations
 
 import ast
+import builtins
 import itertools
 from contextlib import contextmanager
 from types import FrameType
 from typing import Generator, Sequence, cast
 
 import pyccolo as pyc
+import pyccolo.fast as fast
 
 from pipescript.analysis.extract_names import ExtractNames
+
+
+class FreeVarTransformer(ast.NodeTransformer):
+    frame_cache: dict[int, FrameType] = {}
+
+    def __init__(self, freevars: set[str], frame: FrameType) -> None:
+        self.freevars = freevars
+        self.frame_id = id(frame)
+        self.frame_cache[self.frame_id] = frame
+
+    @fast.location_of_arg
+    def visit_Name(self, node: ast.Name) -> ast.Name | ast.Call:
+        if node.id not in self.freevars:
+            return node
+        from pipescript.api.utils import _dynamic_lookup
+
+        return fast.Call(
+            func=fast.Name(_dynamic_lookup.__name__, ast.Load()),
+            args=[fast.Constant(value=node.id), fast.Constant(value=self.frame_id)],
+            keywords=[],
+        )
 
 
 class SingletonArgCounterMixin:
@@ -30,7 +53,7 @@ class SingletonArgCounterMixin:
         lambda_body: ast.expr,
         frame: FrameType,
         created_starred_arg: bool = False,
-    ) -> tuple[ast.Lambda, set[str]]:
+    ) -> tuple[ast.Lambda, set[str], ast.expr | None]:
         num_lambda_args = cls._arg_ctr - orig_ctr
         lambda_args = []
         extra_defaults = ExtractNames.extract_names(lambda_body) - set(
@@ -44,6 +67,19 @@ class SingletonArgCounterMixin:
         if created_starred_arg:
             lambda_args.append(f"*_{cls._arg_ctr}")
             cls._arg_ctr += 1
+        modified_lambda_body: ast.expr | None = None
+        if frame.f_locals is not frame.f_globals:
+            freevars = {
+                arg
+                for arg in extra_defaults
+                if arg not in frame.f_globals
+                and arg not in frame.f_locals
+                and not hasattr(builtins, arg)
+            }
+            if len(freevars) > 0:
+                modified_lambda_body = FreeVarTransformer(freevars, frame).visit(
+                    lambda_body
+                )
         extra_defaults = {arg for arg in extra_defaults if arg in frame.f_locals}
         lambda_arg_str = ", ".join(
             itertools.chain(lambda_args, (f"{arg}={arg}" for arg in extra_defaults))
@@ -56,6 +92,7 @@ class SingletonArgCounterMixin:
                 ).value,
             ),
             extra_defaults,
+            modified_lambda_body,
         )
 
 

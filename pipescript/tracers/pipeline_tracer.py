@@ -21,6 +21,7 @@ from pipescript.analysis.placeholders import (
     SingletonArgCounterMixin,
 )
 from pipescript.api.utils import (
+    _dynamic_lookup,
     collapse,
     lshift,
     null,
@@ -228,6 +229,7 @@ class PipelineTracer(pyc.BaseTracer):
     placeholder_replacer = PlaceholderReplacer(arg_placeholder_spec)
 
     extra_builtins = [
+        _dynamic_lookup,
         collapse,
         lshift,
         null,
@@ -324,9 +326,12 @@ class PipelineTracer(pyc.BaseTracer):
         placeholder_names = self.placeholder_replacer.rewrite(
             lambda_body, allow_top_level=True, check_all_calls=False
         )
-        ast_lambda, _extra = SingletonArgCounterMixin.create_placeholder_lambda(
-            placeholder_names, orig_ctr, lambda_body, frame
+        ast_lambda, _extra_defaults, modified_lambda_body = (
+            SingletonArgCounterMixin.create_placeholder_lambda(
+                placeholder_names, orig_ctr, lambda_body, frame
+            )
         )
+        lambda_body = modified_lambda_body or lambda_body
         ast_lambda.body = lambda_body
         if lambda_body_parent_call is None:
             node_to_eval: ast.expr = ast_lambda
@@ -407,7 +412,7 @@ class PipelineTracer(pyc.BaseTracer):
         allow_top_level: bool,
         full_node: ast.expr | None = None,
         associate_lhs: bool = False,
-    ) -> ast.Lambda:
+    ) -> tuple[ast.Lambda, ast.expr | None]:
         orig_ctr = self.placeholder_replacer.arg_ctr
         placeholder_names = self.placeholder_replacer.rewrite(
             node, allow_top_level=allow_top_level, check_all_calls=True
@@ -429,10 +434,12 @@ class PipelineTracer(pyc.BaseTracer):
             placeholder_names = self.reorder_placeholder_names_for_prior_positions(
                 parent.left, placeholder_names
             )
-        ast_lambda, _ = SingletonArgCounterMixin.create_placeholder_lambda(
-            placeholder_names, orig_ctr, full_node or node, frame
+        ast_lambda, _extra_defaults, modified_lambda_body = (
+            SingletonArgCounterMixin.create_placeholder_lambda(
+                placeholder_names, orig_ctr, full_node or node, frame
+            )
         )
-        return ast_lambda
+        return ast_lambda, modified_lambda_body
 
     @pyc.register_handler(
         pyc.before_right_binop_arg,
@@ -455,9 +462,10 @@ class PipelineTracer(pyc.BaseTracer):
         ):
             return ret
         transformed = StatementMapper.bookkeeping_propagating_copy(node)
-        ast_lambda = self.transform_pipeline_placeholders(
+        ast_lambda, modified_lambda_body = self.transform_pipeline_placeholders(
             transformed, parent, frame, allow_top_level=allow_top_level
         )
+        transformed = modified_lambda_body or transformed
         ast_lambda.body = transformed
         evaluated_lambda = pyc.eval(ast_lambda, frame.f_globals, frame.f_locals)
         return lambda: __hide_pyccolo_frame__ and evaluated_lambda
@@ -529,7 +537,7 @@ class PipelineTracer(pyc.BaseTracer):
         left_arg = transformed = StatementMapper.bookkeeping_propagating_copy(node)
         for _i in range(num_left_traversals_to_lhs_placeholder_node):
             left_arg = left_arg.left  # type: ignore[assignment]
-        ast_lambda = self.transform_pipeline_placeholders(
+        ast_lambda, modified_lambda_body = self.transform_pipeline_placeholders(
             left_arg,
             node,
             frame,
@@ -537,6 +545,7 @@ class PipelineTracer(pyc.BaseTracer):
             full_node=transformed,
             associate_lhs=True,
         )
+        transformed = modified_lambda_body or transformed
         ast_lambda.body = transformed
         evaluated_lambda = pyc.eval(ast_lambda, frame.f_globals, frame.f_locals)
         return lambda *_, **__: __hide_pyccolo_frame__ and evaluated_lambda

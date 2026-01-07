@@ -228,13 +228,16 @@ class MacroTracer(pyc.BaseTracer):
         needs_call_node = (
             self.arg_replacer.arg_ctr == orig_ctr and len(placeholder_names) == 0
         )
-        ast_lambda, extra_defaults = SingletonArgCounterMixin.create_placeholder_lambda(
-            placeholder_names,
-            orig_ctr,
-            lambda_body,
-            frame,
-            created_starred_arg=needs_call_node,
+        ast_lambda, extra_defaults, modified_lambda_body = (
+            SingletonArgCounterMixin.create_placeholder_lambda(
+                placeholder_names,
+                orig_ctr,
+                lambda_body,
+                frame,
+                created_starred_arg=needs_call_node,
+            )
         )
+        lambda_body = modified_lambda_body or lambda_body
         if needs_call_node:
             with fast.location_of(lambda_body):
                 load = ast.Load()
