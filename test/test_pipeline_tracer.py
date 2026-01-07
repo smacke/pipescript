@@ -881,3 +881,27 @@ def test_once():
                 )
             )
         )
+
+
+def test_memoize():
+    with all_tracers():
+        pyc.exec(
+            textwrap.dedent(
+                """
+                import random
+                
+                func = memoize[random.random]
+                assert func() == func()
+                
+                add1 = memoize[$ + 1]
+                assert 1 |> add1 == 2
+                assert 2 |> add1 == 3
+                
+                add42 = memoize[$ |> $ + 42]
+                assert 1 |> add42 == 43
+                assert 2 |> add42 == 44
+                """.strip(
+                    "\n"
+                )
+            )
+        )

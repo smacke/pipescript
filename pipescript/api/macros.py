@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable, TypeVar
 
@@ -7,6 +8,7 @@ from pipescript.constants import pipeline_null
 
 T = TypeVar("T")
 R = TypeVar("R")
+C = TypeVar("C", bound=Callable[..., Any])
 
 
 # Like functoolz `do`
@@ -117,12 +119,17 @@ def once(callpoint_id: int) -> Any:
     return _once_cache[callpoint_id]
 
 
+def memoize(func: C) -> C:
+    return functools.cache(func)  # type: ignore[return-value]
+
+
 __all__ = [
     "context",
     "do",
     "expect",
     "fork",
     "future",
+    "memoize",
     "ntimes",
     "once",
     "parallel",

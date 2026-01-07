@@ -26,6 +26,7 @@ from pipescript.api.macros import (
     expect,
     fork,
     future,
+    memoize,
     ntimes,
     once,
     parallel,
@@ -118,6 +119,7 @@ class MacroTracer(pyc.BaseTracer):
         "ifilter": filter,
         map.__name__: map,
         "imap": map,
+        memoize.__name__: memoize,
         ntimes.__name__: ntimes,
         once.__name__: once,
         parallel.__name__: parallel,
@@ -247,10 +249,17 @@ class MacroTracer(pyc.BaseTracer):
                     keywords=[],
                 )
         ast_lambda.body = lambda_body
-        if func in self.macros and func != "f":
+        if func in self.macros and func not in ("f", memoize.__name__):
             with fast.location_of(ast_lambda):
                 ast_lambda = self._transform_ast_lambda_for_macro(
                     ast_lambda, func, extra_defaults
+                )
+        if func == memoize.__name__:
+            with fast.location_of(ast_lambda):
+                ast_lambda = fast.Call(
+                    func=fast.Name(func, ctx=ast.Load()),
+                    args=[ast_lambda],
+                    keywords=[],
                 )
         return ast_lambda
 
