@@ -787,3 +787,43 @@ def test_read_write_macros():
 def test_unnest():
     with all_tracers():
         assert pyc.eval("42 |> push |> push |> pop |> pop |> unnest") == (42, 42, 42)
+
+
+def test_context_and_expect():
+    with all_tracers():
+        pyc.exec(
+            textwrap.dedent(
+                """
+                from contextlib import contextmanager
+                
+                stack = []
+                
+                @contextmanager
+                def add_stack(val):
+                    stack.append(val)
+                    yield stack
+                    stack.pop()
+                
+                42 |> add_stack |> context[expect[len($) == 1]] |> expect[len($) == 0]
+                42 |> add_stack($) |> context[expect[len($) == 1]] |> expect[len($) == 0]
+                42 |> add_stack |> context[expect[lambda *_: len(stack) == 1]] |> expect[lambda *_: len(stack) == 0]
+                42 |> add_stack($) |> context[expect[lambda *_: len(stack) == 1]] |> expect[lambda *_: len(stack) == 0]
+                
+                try:
+                    42 |> add_stack |> context[expect[len($) == 0]] |> expect[len($) == 0]
+                except AssertionError:
+                    pass
+                else:
+                    assert False
+                
+                try:
+                    42 |> add_stack |> context[expect[len($) == 1]] |> expect[len($) == 1]
+                except AssertionError:
+                    pass
+                else:
+                    assert False
+                """.strip(
+                    "\n"
+                )
+            )
+        )

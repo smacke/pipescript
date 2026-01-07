@@ -20,7 +20,9 @@ import pipescript.api.macros
 from pipescript.analysis.placeholders import SingletonArgCounterMixin
 from pipescript.api.macros import (
     _ntimes_counters,
+    context,
     do,
+    expect,
     fork,
     future,
     ntimes,
@@ -106,7 +108,9 @@ class MacroTracer(pyc.BaseTracer):
     global_guards_enabled = False
 
     macros = {
+        context.__name__: context,
         do.__name__: do,
+        expect.__name__: expect,
         "f": None,
         fork.__name__: fork,
         future.__name__: future,

@@ -98,8 +98,22 @@ def ntimes(obj: T, callpoint_id: int) -> T:
     return obj
 
 
+def context(func, obj):
+    with obj as o:
+        return func(obj if o is None else o)
+
+
+def expect(
+    func: Callable[[T, *tuple[T]], bool], obj: T, *extra: T
+) -> T | tuple[T, ...]:
+    assert func(obj, *extra)
+    return obj if len(extra) == 0 else (obj, *extra)
+
+
 __all__ = [
+    "context",
     "do",
+    "expect",
     "fork",
     "future",
     "ntimes",
