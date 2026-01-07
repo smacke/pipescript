@@ -110,6 +110,13 @@ def expect(
     return obj if len(extra) == 0 else (obj, *extra)
 
 
+_once_cache: dict[int, Any] = {}
+
+
+def once(callpoint_id: int) -> Any:
+    return _once_cache[callpoint_id]
+
+
 __all__ = [
     "context",
     "do",
@@ -117,6 +124,7 @@ __all__ = [
     "fork",
     "future",
     "ntimes",
+    "once",
     "parallel",
     "read",
     "repeat",

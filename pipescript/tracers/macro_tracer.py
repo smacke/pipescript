@@ -20,12 +20,14 @@ import pipescript.api.macros
 from pipescript.analysis.placeholders import SingletonArgCounterMixin
 from pipescript.api.macros import (
     _ntimes_counters,
+    _once_cache,
     context,
     do,
     expect,
     fork,
     future,
     ntimes,
+    once,
     parallel,
     read,
     repeat,
@@ -117,6 +119,7 @@ class MacroTracer(pyc.BaseTracer):
         map.__name__: map,
         "imap": map,
         ntimes.__name__: ntimes,
+        once.__name__: once,
         parallel.__name__: parallel,
         read.__name__: read,
         reduce.__name__: reduce,
@@ -293,6 +296,20 @@ class MacroTracer(pyc.BaseTracer):
         cast(ast.Call, lam.body).args[1] = fast.Constant(value=callpoint_id)
         return lam
 
+    @fast.location_of_arg
+    def _handle_once_macro(self, frame: FrameType, macro_body: ast.expr) -> ast.expr:
+        callpoint_id = id(macro_body)
+        if callpoint_id not in _once_cache:
+            _once_cache[callpoint_id] = pyc.eval(
+                macro_body, frame.f_globals, frame.f_locals
+            )
+        expr = cast(
+            ast.Expr,
+            fast.parse(f"{once.__name__}(None)").body[0],
+        ).value
+        cast(ast.Call, expr).args[0] = fast.Constant(value=callpoint_id)
+        return expr
+
     @pyc.before_subscript_slice(when=is_macro, reentrant=True)
     def handle_macro(
         self, _ret, node: ast.Subscript, frame: FrameType, evt: TraceEvent, *_, **__
@@ -345,6 +362,9 @@ class MacroTracer(pyc.BaseTracer):
         elif func == ntimes.__name__:
             ntimes_lambda = self._handle_ntimes_macro(frame, node.slice)  # type: ignore[arg-type]
             callable_expr = cast(ast.expr, ntimes_lambda)
+        elif func == once.__name__:
+            once_call = self._handle_once_macro(frame, node.slice)
+            callable_expr = cast(ast.expr, once_call)
         else:
             callable_expr = self._handle_macro_impl(node.slice, frame, func)
         evaluated_lambda = pyc.eval(callable_expr, frame.f_globals, frame.f_locals)

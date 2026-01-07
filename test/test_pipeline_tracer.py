@@ -856,3 +856,28 @@ def test_replace():
     with all_tracers():
         assert pyc.eval("42 |> replace(0)") == 0
         assert pyc.eval("0 |> replace(42)") == 42
+
+
+def test_once():
+    with all_tracers():
+        pyc.exec(
+            textwrap.dedent(
+                """
+                from pipescript.constants import pipeline_null
+                
+                def countdown(x):
+                    def passes(obj):
+                        nonlocal x
+                        if x <= 0:
+                            return pipeline_null
+                        x -= 1
+                        return obj
+                    return passes
+                
+                # without the `once` macro, the repeat loop would run infinitely
+                assert [] |> repeat[once[countdown(5)] .> do[$.append(42)]] == [42] * 5
+                """.strip(
+                    "\n"
+                )
+            )
+        )
