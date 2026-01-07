@@ -181,15 +181,56 @@ def test_tuple_unpack_with_placeholders():
 
 def test_placeholder_with_kwarg():
     with all_tracers():
-        pyc.exec("def add(x, y): return x + y; assert 1 |> add($, y=42) == 43")
+        pyc.exec(
+            textwrap.dedent(
+                """
+                def add(x, y):
+                    return x + y
+                1 |> add($, y=42) |> expect[$ == 43]
+                """.strip(
+                    "\n"
+                )
+            )
+        )
+        pyc.exec("add = f[$x + $y]; 1 |> add($, y=42) |> expect[$ == 43]")
+        try:
+            pyc.exec(
+                textwrap.dedent(
+                    """
+                    def add(x, y):
+                        return x + y
+                    1 |> add($, y=42) |> expect[$ == 44]
+                    """.strip(
+                        "\n"
+                    )
+                )
+            )
+        except AssertionError:
+            pass  # expected
+        else:
+            assert False
+        try:
+            pyc.exec("add = f[$x + $y]; 1 |> add($, y=42) |> expect[$ == 44]")
+        except AssertionError:
+            pass  # expected
+        else:
+            assert False
         pyc.exec("42 |> print($, end=' ')")
 
 
 def test_keyword_placeholder():
     with all_tracers():
         pyc.exec(
-            "func = sorted([1, 3, 2], reverse=$); assert func(False) == [1, 2, 3]; assert func(True) == [3, 2, 1]"
+            "func = sorted([1, 3, 2], reverse=$); assert func(False) == [1, 2, 3]; func(True) |> expect[$ == [3, 2, 1]]"
         )
+        try:
+            pyc.exec(
+                "func = sorted([1, 3, 2], reverse=$); assert func(False) == [1, 2, 3]; func(True) |> expect[$ == []]"
+            )
+        except AssertionError:
+            pass  # expected
+        else:
+            assert False
 
 
 def test_named_placeholders_simple():
@@ -720,6 +761,22 @@ def test_repeat_until_fancy_push_pop_shift():
                 )
             )
             == [42, 21, 64, 32, 16, 8, 4, 2, 1]
+        )
+
+
+def test_fancy_fact_table():
+    with all_tracers():
+        pyc.exec(
+            textwrap.dedent(
+                """
+                make_fact_table = $ |> ([1], $) *|> repeat[until[len($)==$+1] .> do[$[0] |> $v.append($v[-1]*len($v))]] |> $[0]
+                
+                4 |> make_fact_table |> expect[$ == [1, 1, 2, 6, 24]]
+                5 |> make_fact_table |> expect[$ == [1, 1, 2, 6, 24, 120]]
+                """.strip(
+                    "\n"
+                )
+            )
         )
 
 
