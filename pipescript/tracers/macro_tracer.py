@@ -262,7 +262,7 @@ class MacroTracer(pyc.BaseTracer):
                 ast_lambda = self._transform_ast_lambda_for_macro(
                     ast_lambda, func, extra_defaults
                 )
-        ret_expr = ast_lambda
+        ret_expr: ast.expr = ast_lambda
         if func in (memoize.__name__, otherwise.__name__):
             with fast.location_of(ast_lambda):
                 ret_expr = fast.Call(
