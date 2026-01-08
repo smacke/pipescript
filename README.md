@@ -1,5 +1,5 @@
 pipescript
-=======
+==========
 
 [![CI Status](https://github.com/smacke/pipescript/workflows/pipescript/badge.svg)](https://github.com/smacke/pipescript/actions)
 [![Checked with mypy](http://www.mypy-lang.org/static/mypy_badge.svg)](http://mypy-lang.org/)
@@ -351,7 +351,7 @@ as a tuple:
 
 `parallel` does the same thing as `fork` but executes each function passed to it concurrently.
 
-#### `when` macro
+#### `when` `unless`, `otherwise`, `repeat`, `until` macros
 
 The `when` macro takes as input a value and conditional expression that, upon passing,
 forwards the value, and upon failing, terminates computation with `None`. It is particularly powerful
@@ -359,12 +359,45 @@ when combined with `fork` and `collapse` (the latter of which extracts the non-n
 the tuple that results from the `fork`):
 
 ```python
-# Define a `collatz` utility and run it up to 20 times on 42
 >>> collatz = when[$ != 1] .> fork[
     when[$ % 2 == 0] .> $ // 2,
     when[$ % 2 == 1] .> $ * 3 + 1,
 ] .> collapse .> peek
->>> 42 |> collatz ** 20
+```
+
+You can also use `unless`, which is just the opposite of `when`:
+
+```python
+>>> collatz = when[$ != 1] .> fork[
+    when[$ % 2 == 0] .> $ // 2,
+    unless[$ % 2 == 0] .> $ * 3 + 1,
+] .> collapse .> peek
+```
+
+If you don't want to explicitly write out the negative conditional, `fork` lets you
+use the `otherwise` macro as the last expression:
+
+```python
+>>> collatz = when[$ != 1] .> fork[
+    when[$ % 2 == 0] .> $ // 2,
+    otherwise[$ * 3 + 1],
+] .> collapse .> peek
+```
+
+Of course, this can be written more naturally and succinctly with
+a ternary conditional expression:
+
+```python
+>>> collatz = when[$ != 1] .> f[$v // 2 if $v % 2 == 0 else $v * 3 + 1] .> peek
+```
+
+Regardless of how we write the conditional, pipescript allows you to
+exponentiate single-argument functions with power the composition (`.**`)
+operator, so that we don't need to write out
+`42 |> collatz |> collatz |> ... |> collatz`:
+
+```python
+>>> 42 |> collatz .** 20
 21
 64
 32
@@ -375,8 +408,21 @@ the tuple that results from the `fork`):
 1
 ```
 
-Right, I forgot to mention that you can exponentiate single-argument functions in pipescript,
-so that we don't need to write out `42 |> collatz |> collatz |> ... |> collatz`.
+If you don't want to guess the upper bound of how many steps to run it, you can
+use the `repeat` and `until` macros (`until` is just an alias of `unless`):
+
+```python
+>>> collatz = f[$v // 2 if $v % 2 == 0 else $v * 3 + 1]
+>>> 42 |> repeat[until[$ == 1] .> collatz .> peek] |> null
+21
+64
+32
+16
+8
+4
+2
+1
+```
 
 #### `future` macro
 
@@ -448,37 +494,9 @@ Because pipescript is implemented using instrumentation (see [How it works](#how
 it does incur overhead. For top-level code written in a Jupyter cell (e.g.,
 code that doesn't have any indentation), the additional overhead generally doesn't matter,
 as it tends to be insignificant when compared to data-intensive dataframe operations
-and SQL queries common in data science workloads. For code invoked repeatedly in loop
-bodies or function calls, however, this overhead can become noticeable; as such, pipescript
-syntax is not enabled by default in these contexts. To opt into pipescript syntax in loops
-and bodies, use the `allow_pipelines_in_loops_and_calls` context manager / decorator.
-
-Example of how to embed an pipescript pipeline in a function body:
-
-```python
-@allow_pipelines_in_loops_and_calls
-def compute_first_k_sums_of_squares(k):
-    lst = []
-    for i in range(1, k + 1):
-        i |> $ ** 2 |> $ + sum(lst) |> do[lst.append($)]
-    return lst
-```
-
-Such functions can be used as normal:
-
-```python
->>> 10 |> compute_first_k_sums_of_squares
-[1, 5, 15, 37, 83, 177, 367, 749, 1515, 3049]
-```
-
-Example of embedding a pipeline in a loop:
-
-```python
-lst = []
-with allow_pipelines_in_loops_and_calls():
-    for i in range(1, 101):
-        i |> $ ** 2 |> $ + sum(lst) |> do[lst.append($)]
-```
+and SQL queries common in data science workloads. Furthermore, overhead is only incurred
+when pipescript syntax is actually used -- there's no penalty for any code written in vanilla
+Python, **even when pipescript has been enabled in your current REPL session**.
 
 ## More Examples
 I developed pipescript while working on
