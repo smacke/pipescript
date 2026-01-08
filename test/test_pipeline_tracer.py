@@ -610,6 +610,66 @@ def test_otherwise():
         )
 
 
+def test_nested_otherwise():
+    with all_tracers():
+        pyc.exec(
+            textwrap.dedent(
+                """
+                threshold = $ |> fork[
+                    when[$ > 42] .> replace(42),
+                    otherwise[fork[
+                        when[$ > 20] .> replace(20),
+                        otherwise[fork[
+                            when[$ > 10] .> replace(10),
+                            otherwise[replace(0)],
+                        ] .> collapse]
+                    ] .> collapse],
+                ] |> collapse
+                
+                1 |> threshold |> expect[$ == 0]
+                5 |> threshold |> expect[$ == 0]
+                11 |> threshold |> expect[$ == 10]
+                15 |> threshold |> expect[$ == 10]
+                21 |> threshold |> expect[$ == 20]
+                31 |> threshold |> expect[$ == 20]
+                41 |> threshold |> expect[$ == 20]
+                44 |> threshold |> expect[$ == 42]
+                99 |> threshold |> expect[$ == 42]
+                """.strip(
+                    "\n"
+                )
+            )
+        )
+        pyc.exec(
+            textwrap.dedent(
+                """
+                pthreshold = $ |> parallel[
+                    when[$ > 42] .> replace(42),
+                    otherwise[fork[
+                        when[$ > 20] .> replace(20),
+                        otherwise[fork[
+                            when[$ > 10] .> replace(10),
+                            otherwise[replace(0)],
+                        ] .> collapse]
+                    ] .> collapse],
+                ] |> collapse
+
+                1 |> pthreshold |> expect[$ == 0]
+                5 |> pthreshold |> expect[$ == 0]
+                11 |> pthreshold |> expect[$ == 10]
+                15 |> pthreshold |> expect[$ == 10]
+                21 |> pthreshold |> expect[$ == 20]
+                31 |> pthreshold |> expect[$ == 20]
+                41 |> pthreshold |> expect[$ == 20]
+                44 |> pthreshold |> expect[$ == 42]
+                99 |> pthreshold |> expect[$ == 42]
+                """.strip(
+                    "\n"
+                )
+            )
+        )
+
+
 def test_future():
     with all_tracers():
         assert pyc.eval("1 |> future[$ + 1] |> $.result()") == 2
@@ -946,6 +1006,57 @@ def test_recursion():
                 
                 assert fact(3) == 6
                 assert fact(4) == 24
+                assert fact(5) == 120
+                """
+            )
+        )
+        pyc.exec(
+            textwrap.dedent(
+                """
+                fact = $ |> fork[when[$ <= 1] .> replace(1), otherwise[$v * fact($v-1)]] |> collapse
+
+                3 |> fact |> expect[$ == 6]
+                4 |> fact |> expect[$ == 24]
+                5 |> fact |> expect[$ == 120]
+                """
+            )
+        )
+        pyc.exec(
+            textwrap.dedent(
+                """
+                fact = $ |> memoize[fork[when[$ <= 1] .> replace(1), otherwise[$v * fact($v-1)]] .> collapse]
+
+                3 |> fact |> expect[$ == 6]
+                4 |> fact |> expect[$ == 24]
+                5 |> fact |> expect[$ == 120]
+                3 |> fact |> expect[$ == 6]
+                4 |> fact |> expect[$ == 24]
+                5 |> fact |> expect[$ == 120]
+                """
+            )
+        )
+        pyc.exec(
+            textwrap.dedent(
+                """
+                fact = memoize[$ |> fork[when[$ <= 1] .> replace(1), otherwise[$v * fact($v-1)]] |> collapse]
+
+                3 |> fact |> expect[$ == 6]
+                4 |> fact |> expect[$ == 24]
+                5 |> fact |> expect[$ == 120]
+                3 |> fact |> expect[$ == 6]
+                4 |> fact |> expect[$ == 24]
+                5 |> fact |> expect[$ == 120]
+                """
+            )
+        )
+        pyc.exec(
+            textwrap.dedent(
+                """
+                fact = $ |> parallel[when[$ <= 1] .> replace(1), otherwise[$v * fact($v-1)]] |> collapse
+
+                3 |> fact |> expect[$ == 6]
+                4 |> fact |> expect[$ == 24]
+                5 |> fact |> expect[$ == 120]
                 """
             )
         )
