@@ -262,14 +262,15 @@ class MacroTracer(pyc.BaseTracer):
                 ast_lambda = self._transform_ast_lambda_for_macro(
                     ast_lambda, func, extra_defaults
                 )
+        ret_expr = ast_lambda
         if func in (memoize.__name__, otherwise.__name__):
             with fast.location_of(ast_lambda):
-                ast_lambda = fast.Call(
+                ret_expr = fast.Call(
                     func=fast.Name(func, ctx=ast.Load()),
                     args=[ast_lambda],
                     keywords=[],
                 )
-        return ast_lambda
+        return ret_expr
 
     @fast.location_of_arg
     def _handle_read_write_macro(

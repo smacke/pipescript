@@ -547,6 +547,7 @@ class PipelineTracer(pyc.BaseTracer):
         self.binop_arg_nodes_to_skip.add(id(node.left))
         self.binop_arg_nodes_to_skip.add(id(node.right))
         self.binop_nodes_to_eval.add(id(node))
+        transformed: ast.expr
         left_arg = transformed = StatementMapper.bookkeeping_propagating_copy(node)
         for _i in range(num_left_traversals_to_lhs_placeholder_node):
             left_arg = left_arg.left  # type: ignore[assignment]
