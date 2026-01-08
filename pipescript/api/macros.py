@@ -21,6 +21,9 @@ def do(func: Callable[[T, *tuple[T]], Any], obj: T, *extra: T) -> T | tuple[T, .
 def fork(
     funcs: tuple[Callable[[T, *tuple[T]], Any]], obj: T, *extra: T
 ) -> tuple[Any, ...]:
+    if isinstance(funcs[0], bool):
+        # TODO: kinda hacky; is there a more robust way to signal the presence of an `otherwise` macro?
+        return _fork_with_otherwise(funcs[1:], obj, *extra)
     results = []
     for func in funcs:
         results.append(func(obj, *extra))
@@ -32,6 +35,8 @@ def fork(
 def parallel(
     funcs: tuple[Callable[[T, *tuple[T]], Any]], obj: T, *extra: T
 ) -> tuple[Any, ...]:
+    if isinstance(funcs[0], bool):
+        return _parallel_with_otherwise(funcs[1:], obj, *extra)
     futures = []
     with ThreadPoolExecutor(max_workers=len(funcs)) as executor:
         for func in funcs:
@@ -44,6 +49,40 @@ def when(func: Callable[[T, *tuple[T]], bool], obj: T, *extra: T) -> T | tuple[T
         return obj if len(extra) == 0 else (obj, *extra)
     else:
         return pipeline_null  # type: ignore[return-value]
+
+
+def otherwise(func: C) -> C:
+    return func
+
+
+def _fork_with_otherwise(
+    funcs: tuple[Callable[[T, *tuple[T]], Any]], obj: T, *extra: T
+) -> tuple[Any, ...]:
+    results: list[Any] = []
+    func: Callable[[T, *tuple[T]], Any]
+    for func in funcs[:-1]:
+        results.append(func(obj, *extra))
+    if all(res is pipeline_null for res in results):
+        results.append(funcs[-1](obj, *extra))
+    else:
+        results.append(pipeline_null)
+    return tuple(results)
+
+
+def _parallel_with_otherwise(
+    funcs: tuple[Callable[[T, *tuple[T]], Any]], obj: T, *extra: T
+) -> tuple[Any, ...]:
+    futures: list[Future[Any]] = []
+    with ThreadPoolExecutor(max_workers=max(len(funcs) - 1, 32)) as executor:
+        func: Callable[[T, *tuple[T]], Any]
+        for func in funcs[:-1]:
+            futures.append(executor.submit(func, obj, *extra))
+    results = list(fut.result() for fut in futures)
+    if all(res is pipeline_null for res in results):
+        results.append(funcs[-1](obj, *extra))
+    else:
+        results.append(pipeline_null)
+    return tuple(results)
 
 
 # just like `when` but inverted
@@ -132,6 +171,7 @@ __all__ = [
     "memoize",
     "ntimes",
     "once",
+    "otherwise",
     "parallel",
     "read",
     "repeat",

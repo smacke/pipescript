@@ -29,6 +29,7 @@ from pipescript.api.macros import (
     memoize,
     ntimes,
     once,
+    otherwise,
     parallel,
     read,
     repeat,
@@ -107,6 +108,7 @@ class MacroTracer(pyc.BaseTracer):
 
     allow_reentrant_events = True
     global_guards_enabled = False
+    multiple_threads_allowed = True
 
     macros = {
         context.__name__: context,
@@ -122,6 +124,7 @@ class MacroTracer(pyc.BaseTracer):
         memoize.__name__: memoize,
         ntimes.__name__: ntimes,
         once.__name__: once,
+        otherwise.__name__: otherwise,
         parallel.__name__: parallel,
         read.__name__: read,
         reduce.__name__: reduce,
@@ -139,8 +142,6 @@ class MacroTracer(pyc.BaseTracer):
         self.arg_replacer = _ArgReplacer()
         self.lambda_cache: dict[tuple[int, int, TraceEvent], Any] = {}
         self._overridden_builtins: list[str] = []
-        with self.register_additional_ast_bookkeeping():
-            self.placeholder_inference_skip_nodes: set[int] = set()
         user_ns = get_user_ns()
         for macro_name, macro in self.macros.items():
             if hasattr(builtins, macro_name):
@@ -252,12 +253,16 @@ class MacroTracer(pyc.BaseTracer):
                     keywords=[],
                 )
         ast_lambda.body = lambda_body
-        if func in self.macros and func not in ("f", memoize.__name__):
+        if func in self.macros and func not in (
+            "f",
+            memoize.__name__,
+            otherwise.__name__,
+        ):
             with fast.location_of(ast_lambda):
                 ast_lambda = self._transform_ast_lambda_for_macro(
                     ast_lambda, func, extra_defaults
                 )
-        if func == memoize.__name__:
+        if func in (memoize.__name__, otherwise.__name__):
             with fast.location_of(ast_lambda):
                 ast_lambda = fast.Call(
                     func=fast.Name(func, ctx=ast.Load()),
@@ -338,11 +343,17 @@ class MacroTracer(pyc.BaseTracer):
         ):
             callables: list[ast.expr] = []
             max_nargs = 1
+            expr: ast.expr | None = None
             for expr in node.slice.elts:
                 expr_lambda = self._handle_macro_impl(expr, frame, "f")
                 callables.append(expr_lambda)
                 if isinstance(expr_lambda, ast.Lambda):
                     max_nargs = max(max_nargs, len(expr_lambda.args.args))
+            has_otherwise = (
+                isinstance(expr, ast.Subscript)
+                and isinstance(expr.value, ast.Name)
+                and expr.value.id == otherwise.__name__
+            )
             with fast.location_of(node.slice):
                 args = [
                     f"_{arg_ctr}"
@@ -357,16 +368,17 @@ class MacroTracer(pyc.BaseTracer):
                     cast(ast.Expr, fast.parse(f"lambda {arg_str}: None").body[0]).value,
                 )
                 load = ast.Load()
-                tuple_elts: list[ast.Call] = []
+                tuple_elts: list[ast.expr] = []
+                if has_otherwise:
+                    tuple_elts.append(fast.Constant(value=True))
                 for lam in callables:
-                    call_node = fast.Call(
-                        func=lam,
-                        args=[fast.Name(arg, ctx=load) for arg in args],
-                        keywords=[],
-                    )
-                    self.placeholder_inference_skip_nodes.add(id(call_node))
-                    tuple_elts.append(call_node)
-                ast_lambda.body = fast.Tuple(tuple_elts, ctx=load)
+                    tuple_elts.append(lam)
+                ast_lambda.body = fast.Call(
+                    func=fast.Name(id=func, ctx=load),
+                    args=[fast.Tuple(tuple_elts, ctx=load)]
+                    + [fast.Name(arg, ctx=load) for arg in args],
+                    keywords=[],
+                )
                 callable_expr = ast_lambda
         elif func in (read.__name__, write.__name__):
             rw_lambda = self._handle_read_write_macro(func, node.slice)  # type: ignore[arg-type]

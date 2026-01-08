@@ -580,6 +580,36 @@ def test_when():
         )
 
 
+def test_otherwise():
+    with all_tracers():
+        assert (
+            pyc.eval(
+                "1 |> fork[$ |> when[$ < 0] |> $ - 41, otherwise[$ + 41]] |> collapse"
+            )
+            == 42
+        )
+        assert (
+            pyc.eval("1 |> fork[when[$ < 0] .> $ - 41, otherwise[$ + 41]] |> collapse")
+            == 42
+        )
+        assert (
+            pyc.eval(
+                "1 |> fork[$ |> when[$ < 0] |> $ - 41, otherwise[$ + 41]] |> collapse"
+            )
+            == 42
+        )
+        assert (
+            pyc.eval(
+                "1 |> fork[$ |> when[$ >= 0] |> $ + 41, otherwise[$ - 41]] |> collapse"
+            )
+            == 42
+        )
+        assert (
+            pyc.eval("1 |> fork[when[$ >= 0] .> $ + 41, otherwise[$ - 41]] |> collapse")
+            == 42
+        )
+
+
 def test_future():
     with all_tracers():
         assert pyc.eval("1 |> future[$ + 1] |> $.result()") == 2

@@ -20,6 +20,7 @@ from pipescript.analysis.placeholders import (
     PlaceholderReplacer,
     SingletonArgCounterMixin,
 )
+from pipescript.api.macros import fork, parallel
 from pipescript.api.utils import (
     _dynamic_lookup,
     collapse,
@@ -54,6 +55,29 @@ def parent_is_pipeline_bitor_op(node_or_id: ast.expr | int) -> bool:
     node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
     parent = pyc.BaseTracer.containing_ast_by_id.get(node_id)
     return node_is_pipeline_bitor_op(parent)
+
+
+# TODO: this is not ideal. we are preventing the pipeline_null -> None coalescing behavior for
+#   fork / parallel macros explicitly, which feels error prone. Is there a more robust way?
+def parent_is_fork_macro(node_or_id: ast.expr | int) -> bool:
+    node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
+    parent = pyc.BaseTracer.containing_ast_by_id.get(node_id)
+    while isinstance(parent, (ast.Lambda, ast.Tuple)):
+        parent = pyc.BaseTracer.containing_ast_by_id.get(id(parent))
+    if (
+        isinstance(parent, ast.Subscript)
+        and isinstance(parent.value, ast.Name)
+        and parent.value.id in (fork.__name__, parallel.__name__)
+    ):
+        return True
+    elif (
+        isinstance(parent, ast.Call)
+        and isinstance(parent.func, ast.Name)
+        and parent.func.id in (fork.__name__, parallel.__name__)
+    ):
+        return True
+    else:
+        return False
 
 
 def node_is_function_power_op(node: ast.AST | None) -> bool:
@@ -104,6 +128,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     allow_reentrant_events = True
     global_guards_enabled = False
+    multiple_threads_allowed = True
 
     pipeline_dict_op_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.binop, token="**|>", replacement="|"
@@ -287,23 +312,11 @@ class PipelineTracer(pyc.BaseTracer):
     def handle_chain_placeholder_rewrites(
         self, ret, node: ast.expr, frame: FrameType, *_, **__
     ):
-        from pipescript.tracers.macro_tracer import MacroTracer
-
         with self.lexical_chain_stack.push():
             self.cur_chain_placeholder_lambda = None
         if not self.placeholder_replacer.search(
             node, allow_top_level=True, check_all_calls=False
         ):
-            return ret
-        elif (
-            MacroTracer.initialized()
-            and id(node) in MacroTracer.instance().placeholder_inference_skip_nodes
-        ):
-            # TODO: this is kinda hacky. Normally we would skip this handler because the
-            #   placeholder replacer would short circuit when it sees a macro
-            #   boundary, but in this case, we're already past the macro boundary.
-            #   Ideally we would have a more robust way to tell that we're already
-            #   inside a macro instead of relying on this allowlist mechanism.
             return ret
         __hide_pyccolo_frame__ = True
         frame_to_node_mapping[frame.f_code.co_filename, frame.f_lineno] = node
@@ -721,7 +734,8 @@ class PipelineTracer(pyc.BaseTracer):
     @pyc.register_handler(
         pyc.after_binop,
         when=lambda node: node_is_pipeline_bitor_op(node)
-        and not parent_is_pipeline_bitor_op(node),
+        and not parent_is_pipeline_bitor_op(node)
+        and not parent_is_fork_macro(node),
         reentrant=True,
     )
     def coalesce_pipeline_null(self, ret, *_, **__):
