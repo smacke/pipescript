@@ -1,10 +1,22 @@
 from __future__ import annotations
 
 import textwrap
+from contextlib import contextmanager
+from typing import Generator
 
 import pyccolo as pyc
 
+from pipescript.tracers.macro_tracer import MacroTracer
 from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
+from pipescript.tracers.pipeline_tracer import PipelineTracer
+
+
+@contextmanager
+def all_tracers() -> Generator[None, None, None]:
+    with PipelineTracer:
+        with MacroTracer:
+            with OptionalChainingTracer:
+                yield
 
 
 def test_optional_chaining_simple():
@@ -100,4 +112,110 @@ def test_multiline_nullish_coalescing():
                 )
             )
             == ""
+        )
+
+
+def test_everything_everywhere_all_at_once():
+    with all_tracers():
+        pyc.exec(
+            textwrap.dedent(
+                """
+                d1 = None
+                try:
+                    d1.?["foo"]
+                except TypeError:
+                    pass
+                else:
+                    assert False
+                assert d1?.["foo"] is None
+                d1 |> expect[$?.["foo"] is None]
+                assert d1?.["foo"].bar().baz is None
+                d1 |> expect[$?.["foo"].bar().baz is None]
+                assert d1?.?["foo"] is None
+                d1 |> expect[$?.?["foo"] is None]
+                assert d1?.?["foo"].bar().baz is None
+                d1 |> expect[$?.?["foo"].bar().baz is None]
+                
+                d2 = {"bar": 42}
+                try:
+                    d2?.["foo"]
+                except KeyError:
+                    pass
+                else:
+                    assert False
+                try:
+                    d2 |> $?.["foo"]
+                except KeyError:
+                    pass
+                else:
+                    assert False
+                assert d2.?["foo"] is None
+                d2 |> expect[$.?["foo"] is None]
+                try:
+                    assert d2.?["foo"].bar is None
+                except AttributeError:
+                    pass
+                else:
+                    assert False
+                try:
+                    d2 |> expect[$.?["foo"].bar is None]
+                except AttributeError:
+                    pass
+                else:
+                    assert False
+                try:
+                    assert d2?.?["foo"].bar is None
+                except AttributeError:
+                    pass
+                else:
+                    assert False
+                try:
+                    d2 |> expect[$?.?["foo"].bar is None]
+                except AttributeError:
+                    pass
+                else:
+                    assert False
+                try:
+                    assert d2?.?["foo"].bar.baz(bam().bat().zzzz).yyyy is None
+                except AttributeError:
+                    pass
+                else:
+                    assert False
+                try:
+                    d2 |> expect[$?.?["foo"].bar.baz(bam().bat().zzzz).yyyy is None]
+                except AttributeError:
+                    pass
+                else:
+                    assert False
+                assert d2.?["foo"]?.bar is None
+                d2 |> expect[$.?["foo"]?.bar is None]
+                assert d2.?["foo"]?.bar.baz().yyyy is None
+                d2 |> expect[$.?["foo"]?.bar.baz().yyyy is None]
+                assert d2.?["foo"]?.bar.baz(bam().bat).yyyy is None
+                d2 |> expect[$.?["foo"]?.bar.baz(bam().bat).yyyy is None]
+                assert d2.?["foo"]?.bar.baz(d1().bat).yyyy is None
+                d2 |> expect[$.?["foo"]?.bar.baz(d1().bat).yyyy is None]
+                assert d2?.?["foo"] is None
+                d2 |> expect[$?.?["foo"] is None]
+                assert d2?.?["foo"]?.bar is None
+                d2 |> expect[$?.?["foo"]?.bar is None]
+                assert d2?.?["foo"]?.bar.baz(bam().bat().zzzz).yyyy is None
+                d2 |> expect[$?.?["foo"]?.bar.baz(bam().bat().zzzz).yyyy is None]
+                assert d2?.?["foo"]?.bar.baz(d1().bat().zzzz).yyyy is None
+                d2 |> expect[$?.?["foo"]?.bar.baz(d1().bat().zzzz).yyyy is None]
+                assert d2?.?["foo"]?.bar.baz(d1).yyyy is None
+                d2 |> expect[$?.?["foo"]?.bar.baz(d1).yyyy is None]
+
+                assert d2["bar"] == 42
+                d2 |> expect[$["bar"] == 42]
+                assert d2?.["bar"] == 42
+                d2 |> expect[$?.["bar"] == 42]
+                assert d2.?["bar"] == 42
+                d2 |> expect[$.?["bar"] == 42]
+                assert d2?.?["bar"] == 42
+                d2 |> expect[$?.?["bar"] == 42]
+                """.strip(
+                    "\n"
+                )
+            )
         )

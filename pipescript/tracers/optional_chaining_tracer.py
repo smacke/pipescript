@@ -45,20 +45,45 @@ class NullishInstrumentationChainChecker(ast.NodeVisitor):
     def __init__(self) -> None:
         self._contains_nullish_instrumentation = False
 
-    def __call__(self, node_id: int) -> bool:
-        node = pyc.BaseTracer.ast_node_by_id.get(node_id)
+    def __call__(self, node_or_id: ast.AST | int) -> bool:
+        node = (
+            node_or_id
+            if isinstance(node_or_id, ast.AST)
+            else pyc.BaseTracer.ast_node_by_id.get(node_or_id)
+        )
         if node is None:
             return False
         self._contains_nullish_instrumentation = False
         self.visit(node)
         return self._contains_nullish_instrumentation
 
+    def check_parent(self, node_or_id: ast.AST | int) -> bool:
+        node_id = node_or_id if isinstance(node_or_id, int) else id(node_or_id)
+        parent = pyc.BaseTracer.containing_ast_by_id.get(node_id)
+        if parent is None:
+            return False
+        else:
+            return self(parent)
+
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if has_augmentations(
             node,
             {
-                OptionalChainingTracer.optional_chaining_spec,
-                OptionalChainingTracer.permissive_attr_dereference_spec,
+                OptionalChainingTracer.attr_optional_chaining_spec,
+                OptionalChainingTracer.attr_permissive_chaining_spec,
+            },
+        ):
+            self._contains_nullish_instrumentation = True
+            return
+        self.visit(node.value)
+
+    def visit_Subscript(self, node: ast.Subscript) -> None:
+        if has_augmentations(
+            node,
+            {
+                OptionalChainingTracer.subscript_optional_chaining_spec,
+                OptionalChainingTracer.subscript_permissive_chaining_spec,
+                OptionalChainingTracer.subscript_permissive_and_optional_chaining_spec,
             },
         ):
             self._contains_nullish_instrumentation = True
@@ -86,6 +111,12 @@ class OptionalChainingTracer(pyc.BaseTracer):
             else:
                 return None
 
+        def __getitem__(self, _item: str):
+            if self.__eventually:
+                return self
+            else:
+                return None
+
         def __call__(self, *_, **__):
             return self
 
@@ -96,11 +127,23 @@ class OptionalChainingTracer(pyc.BaseTracer):
         aug_type=pyc.AugmentationType.call, token="?.(", replacement="("
     )
 
-    optional_chaining_spec = pyc.AugmentationSpec(
+    subscript_permissive_and_optional_chaining_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_suffix, token="?.?[", replacement="["
+    )
+
+    subscript_optional_chaining_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_suffix, token="?.[", replacement="["
+    )
+
+    subscript_permissive_chaining_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_suffix, token=".?[", replacement="["
+    )
+
+    attr_optional_chaining_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.dot_suffix, token="?.", replacement="."
     )
 
-    permissive_attr_dereference_spec = pyc.AugmentationSpec(
+    attr_permissive_chaining_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.dot_suffix, token=".?", replacement="."
     )
 
@@ -128,29 +171,69 @@ class OptionalChainingTracer(pyc.BaseTracer):
             self.lexical_nullish_stack.pop()
 
     @pyc.register_handler(
-        pyc.before_attribute_load,
+        pyc.before_subscript_load,
         when=should_instrument_for_spec(
-            {optional_chaining_spec, permissive_attr_dereference_spec}
+            {
+                subscript_optional_chaining_spec,
+                subscript_permissive_chaining_spec,
+                subscript_permissive_and_optional_chaining_spec,
+            }
         ),
         reentrant=True,
     )
-    def handle_before_attr_with_optional_chaining_spec(
-        self, obj, node: ast.Attribute, *_, **__
+    def handle_before_subscript_with_optional_chaining_spec(
+        self, obj, node: ast.Subscript, *_, attr_or_subscript: object, **__
     ):
+        __hide_pyccolo_frame__ = True  # noqa: F841
         this_node_augmentations = self.get_augmentations(id(node))
-        if self.optional_chaining_spec in this_node_augmentations and obj is None:
+        if (
+            this_node_augmentations
+            & {
+                self.subscript_optional_chaining_spec,
+                self.subscript_permissive_and_optional_chaining_spec,
+            }
+            and obj is None
+        ):
             return self.resolves_to_none_eventually
         elif (
-            self.permissive_attr_dereference_spec in this_node_augmentations
-            and not hasattr(obj, node.attr)
+            this_node_augmentations
+            & {
+                self.subscript_permissive_chaining_spec,
+                self.subscript_permissive_and_optional_chaining_spec,
+            }
+            and hasattr(obj, "__contains__")
+            and attr_or_subscript not in obj
         ):
             return self.resolves_to_none_immediately
         else:
             return obj
 
     @pyc.register_handler(
+        pyc.before_attribute_load,
+        when=should_instrument_for_spec(
+            {attr_optional_chaining_spec, attr_permissive_chaining_spec}
+        ),
+        reentrant=True,
+    )
+    def handle_before_attr_with_optional_chaining_spec(
+        self, obj, node: ast.Attribute, *_, **__
+    ):
+        __hide_pyccolo_frame__ = True  # noqa: F841
+        this_node_augmentations = self.get_augmentations(id(node))
+        if self.attr_optional_chaining_spec in this_node_augmentations and obj is None:
+            return self.resolves_to_none_eventually
+        elif (
+            self.attr_permissive_chaining_spec in this_node_augmentations
+            and not hasattr(obj, node.attr)
+        ):
+            return self.resolves_to_none_immediately
+        else:
+            # this should not happen
+            return obj
+
+    @pyc.register_handler(
         pyc.before_call,
-        when=should_instrument_for_spec(call_optional_chaining_spec),
+        when=chain_checker,
         reentrant=True,
     )
     def handle_before_call_with_call_optional_chaining_spec(self, func, *_, **__):
@@ -162,7 +245,7 @@ class OptionalChainingTracer(pyc.BaseTracer):
 
     @pyc.register_raw_handler(
         pyc.before_argument,
-        when=should_instrument_for_spec_on_parent(call_optional_chaining_spec),
+        when=chain_checker.check_parent,
         reentrant=True,
     )
     def handle_before_arg_of_func_with_call_optional_chaining_spec(
@@ -175,7 +258,7 @@ class OptionalChainingTracer(pyc.BaseTracer):
 
     @pyc.register_raw_handler(
         pyc.after_call,
-        when=should_instrument_for_spec(call_optional_chaining_spec),
+        when=chain_checker,
         reentrant=True,
     )
     def handle_after_call_with_call_optional_chaining_spec(self, *_, **__):
@@ -215,6 +298,7 @@ class OptionalChainingTracer(pyc.BaseTracer):
         self.lexical_nullish_stack.pop()
 
     def _maybe_compute_nullish_coalesced_value(self, ret, node_id: int) -> None:
+        __hide_pyccolo_frame__ = True  # noqa: F841
         if self.coalesced_value is not None:
             return
         val = ret()
@@ -232,6 +316,7 @@ class OptionalChainingTracer(pyc.BaseTracer):
         reentrant=True,
     )
     def coalesce_boolop_values(self, ret, node_id: int, *_, is_last: bool, **__):
+        __hide_pyccolo_frame__ = True  # noqa: F841
         if self.cur_boolop_has_nullish_coalescer:
             if is_last:
                 if self.coalesced_value is None:

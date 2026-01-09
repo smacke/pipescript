@@ -1,6 +1,10 @@
 History
 =======
 
+0.0.9 (2026-01-08)
+------------------
+* Improve optional chaining call behavior and enable optional chaining for subscripts;
+
 0.0.8 (2026-01-07)
 ------------------
 * Bugfixes, performance improvements, and additional macros;
