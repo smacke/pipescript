@@ -1,6 +1,10 @@
 History
 =======
 
+0.0.10 (2026-01-09)
+-------------------
+*  Bump dependencies with range-based augmentation detection bugfix;
+
 0.0.9 (2026-01-08)
 ------------------
 * Improve optional chaining call behavior and enable optional chaining for subscripts;
