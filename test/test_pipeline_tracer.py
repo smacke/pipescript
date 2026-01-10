@@ -317,6 +317,28 @@ def test_multiline_pipeline():
         )
 
 
+def test_multiline_pipeline_again():
+    with all_tracers():
+        assert (
+            pyc.eval(
+                textwrap.dedent(
+                    """
+                1 |> ($ |>
+                    $ + 1 |>
+                    $ + 2 |>
+                    $ + 3 |>
+                    when[$ > 3] |>
+                    $ + 4
+                ) .** 3
+                """.strip(
+                        "\n"
+                    )
+                )
+            )
+            == 31
+        )
+
+
 def test_multistep_multiline_pipeline():
     with all_tracers():
         pyc.exec(
