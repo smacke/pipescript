@@ -245,6 +245,12 @@ class PipelineTracer(pyc.BaseTracer):
         aug_type=pyc.AugmentationType.call, token="$(", replacement="("
     )
 
+    macro_arg_placeholder_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix,
+        token="$$",
+        replacement="_",
+    )
+
     arg_placeholder_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.dot_prefix,
         token="$",

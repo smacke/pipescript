@@ -27,12 +27,12 @@ def refresh_dynamic_macros(env: dict[str, Any]) -> None:
 
 
 def test_simple_dynamic_macro():
-    refresh_dynamic_macros(pyc.exec("switch = macro[fork[$] .> collapse]"))
+    refresh_dynamic_macros(pyc.exec("switch = macro[fork[$$] .> collapse]"))
     assert pyc.eval("1 |> switch[when[$==0] .> $+1, when[$==1] .> $-1]") == 0
     assert pyc.eval("0 |> switch[when[$==0] .> $+1, when[$==1] .> $-1]") == 1
 
 
 def test_pipeline_placeholder_dynamic_macro():
-    refresh_dynamic_macros(pyc.exec("switch = macro[$ |> fork[$] |> collapse]"))
+    refresh_dynamic_macros(pyc.exec("switch = macro[$ |> fork[$$] |> collapse]"))
     assert pyc.eval("1 |> switch[when[$==0] .> $+1, when[$==1] .> $-1]") == 0
     assert pyc.eval("0 |> switch[when[$==0] .> $+1, when[$==1] .> $-1]") == 1

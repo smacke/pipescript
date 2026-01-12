@@ -107,16 +107,6 @@ class PlaceholderReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
         self.check_all_calls = False
         self.placeholder_names: dict[str, None] = {}
         self.arg_placeholder_spec = arg_placeholder_spec
-        self._macro_visit_context: bool = False
-
-    @contextmanager
-    def macro_visit_context(self, override: bool = True) -> Generator[None, None, None]:
-        old = self._macro_visit_context
-        try:
-            self._macro_visit_context = True
-            yield
-        finally:
-            self._macro_visit_context = old
 
     @contextmanager
     def disallow_top_level(self) -> Generator[None, None, None]:
@@ -150,13 +140,9 @@ class PlaceholderReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
     def visit_Subscript(self, node: ast.Subscript) -> None:
         from pipescript.tracers.macro_tracer import MacroTracer
 
-        if (
-            not self._macro_visit_context
-            and isinstance(node.value, ast.Name)
-            and (
-                node.value.id in MacroTracer.static_macros
-                or node.value.id in MacroTracer.dynamic_macros
-            )
+        if isinstance(node.value, ast.Name) and (
+            node.value.id in MacroTracer.static_macros
+            or node.value.id in MacroTracer.dynamic_macros
         ):
             # defer visiting nested quick lambdas
             return
@@ -164,8 +150,7 @@ class PlaceholderReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
 
     def visit_BinOp(self, node: ast.BinOp) -> None:
         if (
-            not self._macro_visit_context
-            and not self.allow_top_level
+            not self.allow_top_level
             and isinstance(node.op, ast.BitOr)
             and pyc.BaseTracer.get_augmentations(id(node))
         ):

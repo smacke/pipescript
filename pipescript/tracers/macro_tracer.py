@@ -59,6 +59,17 @@ class _ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
         finally:
             self._macro_visit_context = old
 
+    @property
+    def placeholder_nodes(self) -> set[int]:
+        if self._macro_visit_context:
+            return PipelineTracer.augmented_node_ids_by_spec[
+                PipelineTracer.macro_arg_placeholder_spec
+            ]
+        else:
+            return PipelineTracer.augmented_node_ids_by_spec[
+                PipelineTracer.arg_placeholder_spec
+            ]
+
     def visit_Subscript(self, node: ast.Subscript) -> None:
         if (
             not self._macro_visit_context
@@ -70,16 +81,9 @@ class _ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
-        if (
-            id(node)
-            not in PipelineTracer.augmented_node_ids_by_spec[
-                PipelineTracer.arg_placeholder_spec
-            ]
-        ):
+        if id(node) not in self.placeholder_nodes:
             return
-        PipelineTracer.augmented_node_ids_by_spec[
-            PipelineTracer.arg_placeholder_spec
-        ].remove(id(node))
+        self.placeholder_nodes.remove(id(node))
         assert node.id.startswith("_")
         if node.id == "_":
             node.id = f"_{self.arg_ctr}"
@@ -92,28 +96,19 @@ class _ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
         self.arg_node_id_to_placeholder_name[id(node)] = node.id
 
     def visit_pipeline(self, node: ast.BinOp) -> None:
-        with PipelineTracer.placeholder_replacer.macro_visit_context(
-            override=self._macro_visit_context
-        ):
-            num_left_traversals = PipelineTracer.search_left_descendant_placeholder(
-                node
-            )
+        num_left_traversals = PipelineTracer.search_left_descendant_placeholder(node)
         if num_left_traversals < 0:
-            if self._macro_visit_context:
-                self.generic_visit(node)
             return
         left_arg: ast.expr = node
-        for _ in range(num_left_traversals - self._macro_visit_context):
+        for _ in range(num_left_traversals):
             left_arg = left_arg.left  # type: ignore[attr-defined]
-        if self._macro_visit_context:
-            assert isinstance(left_arg, ast.BinOp)
-            self.visit(left_arg.right)
-        else:
-            self.visit(left_arg)
+        self.visit(left_arg)
 
     def visit_BinOp(self, node: ast.BinOp) -> None:
-        if isinstance(node.op, ast.BitOr) and PipelineTracer.get_augmentations(
-            id(node)
+        if (
+            not self._macro_visit_context
+            and isinstance(node.op, ast.BitOr)
+            and PipelineTracer.get_augmentations(id(node))
         ):
             self.visit_pipeline(node)
         else:
@@ -152,7 +147,7 @@ class DynamicMacroArgSubstitutor(ast.NodeTransformer):
         self.arg_node_ids = arg_node_ids
         self.arg_node_subst_exprs = arg_node_subst_exprs
 
-    def generic_visit(self, node: ast.AST) -> ast.AST:
+    def visit_Name(self, node: ast.Name) -> ast.AST:
         if id(node) in self.arg_node_ids:
             return self.arg_node_subst_exprs[self.arg_node_ids.index(id(node))]
         else:
@@ -173,7 +168,7 @@ class DynamicMacro:
         arg_node_ids = list(arg_replacer.arg_node_id_to_placeholder_name)
         expanded_args: list[ast.expr] = [args]
         if len(arg_node_ids) > 1:
-            if not isinstance(args, ast.Tuple):
+            if not isinstance(args, (ast.List, ast.Tuple)):
                 raise ValueError(
                     "Need multiple args but unable to expand singleton subscript arg"
                 )
@@ -277,9 +272,9 @@ class MacroTracer(pyc.BaseTracer):
         __hide_pyccolo_frame__ = True
         assert isinstance(node.value, ast.Name)
         macro_instance = self.dynamic_macros[node.value.id]
-        macro_substitution_expr = macro_instance(node.slice)
+        expanded_macro_expr = macro_instance(node.slice)
         evaluated_lambda = pyc.eval(
-            macro_substitution_expr, frame.f_globals, frame.f_locals
+            expanded_macro_expr, frame.f_globals, frame.f_locals
         )
         ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731
         self.lambda_cache[lambda_cache_key] = ret
