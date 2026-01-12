@@ -142,16 +142,20 @@ def is_dynamic_macro(node: ast.AST) -> bool:
 
 class DynamicMacroArgSubstitutor(ast.NodeTransformer):
     def __init__(
-        self, arg_node_ids: list[int], arg_node_subst_exprs: list[ast.expr]
+        self,
+        arg_node_id_to_placeholder_name: dict[int, str],
+        ordered_arg_names: list[str],
+        arg_node_subst_exprs: list[ast.expr],
     ) -> None:
-        self.arg_node_ids = arg_node_ids
+        self.arg_node_id_to_placeholder_name = arg_node_id_to_placeholder_name
+        self.ordered_arg_names = ordered_arg_names
         self.arg_node_subst_exprs = arg_node_subst_exprs
 
     def visit_Name(self, node: ast.Name) -> ast.AST:
-        if id(node) in self.arg_node_ids:
-            return self.arg_node_subst_exprs[self.arg_node_ids.index(id(node))]
-        else:
+        arg_name = self.arg_node_id_to_placeholder_name.get(id(node))
+        if arg_name is None:
             return super().generic_visit(node)
+        return self.arg_node_subst_exprs[self.ordered_arg_names.index(arg_name)]
 
 
 class DynamicMacro:
@@ -165,20 +169,23 @@ class DynamicMacro:
         arg_replacer = MacroTracer.instance().arg_replacer
         with arg_replacer.macro_visit_context():
             arg_replacer(template_copy)
-        arg_node_ids = list(arg_replacer.arg_node_id_to_placeholder_name)
+        arg_node_id_to_placeholder_name = arg_replacer.arg_node_id_to_placeholder_name
+        ordered_arg_names = list(arg_node_id_to_placeholder_name.values())
         expanded_args: list[ast.expr] = [args]
-        if len(arg_node_ids) > 1:
+        if len(ordered_arg_names) > 1:
             if not isinstance(args, (ast.List, ast.Tuple)):
                 raise ValueError(
                     "Need multiple args but unable to expand singleton subscript arg"
                 )
             expanded_args = args.elts
-        if len(arg_node_ids) != len(expanded_args):
+        if len(ordered_arg_names) != len(expanded_args):
             raise ValueError(
                 "Wrong number of arguments to macro: expected %d but got %d"
-                % (len(arg_node_ids), len(expanded_args))
+                % (len(ordered_arg_names), len(expanded_args))
             )
-        substitutor = DynamicMacroArgSubstitutor(arg_node_ids, expanded_args)
+        substitutor = DynamicMacroArgSubstitutor(
+            arg_node_id_to_placeholder_name, ordered_arg_names, expanded_args
+        )
         return substitutor.visit(template_copy)
 
     def __getitem__(self, *_, **__):
