@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import ast
 import builtins
+from contextlib import contextmanager
 from functools import reduce
 from types import FrameType
-from typing import Any, cast
+from typing import Any, Generator, cast
 
 import pyccolo as pyc
 from pyccolo import fast
@@ -45,10 +46,25 @@ from pipescript.utils import get_user_ns
 class _ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
     def __init__(self) -> None:
         super().__init__()
-        self.placeholder_names: dict[str, None] = {}
+        self.placeholder_names: list[str] = []
+        self.arg_node_id_to_placeholder_name: dict[int, str] = {}
+        self._macro_visit_context: bool = False
+
+    @contextmanager
+    def macro_visit_context(self, override: bool = True) -> Generator[None, None, None]:
+        old = self._macro_visit_context
+        try:
+            self._macro_visit_context = override
+            yield
+        finally:
+            self._macro_visit_context = old
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
-        if isinstance(node.value, ast.Name) and node.value.id in MacroTracer.macros:
+        if (
+            not self._macro_visit_context
+            and isinstance(node.value, ast.Name)
+            and node.value.id in MacroTracer.static_macros
+        ):
             # defer visiting nested quick lambdas
             return
         self.generic_visit(node)
@@ -71,16 +87,29 @@ class _ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
         else:
             if node.id[1].isalpha():
                 node.id = node.id[1:]
-            self.placeholder_names[node.id] = None
+            if node.id not in self.placeholder_names:
+                self.placeholder_names.append(node.id)
+        self.arg_node_id_to_placeholder_name[id(node)] = node.id
 
     def visit_pipeline(self, node: ast.BinOp) -> None:
-        num_left_traversals = PipelineTracer.search_left_descendant_placeholder(node)
+        with PipelineTracer.placeholder_replacer.macro_visit_context(
+            override=self._macro_visit_context
+        ):
+            num_left_traversals = PipelineTracer.search_left_descendant_placeholder(
+                node
+            )
         if num_left_traversals < 0:
+            if self._macro_visit_context:
+                self.generic_visit(node)
             return
         left_arg: ast.expr = node
-        for _ in range(num_left_traversals):
-            left_arg = node.left
-        self.visit(left_arg)
+        for _ in range(num_left_traversals - self._macro_visit_context):
+            left_arg = left_arg.left  # type: ignore[attr-defined]
+        if self._macro_visit_context:
+            assert isinstance(left_arg, ast.BinOp)
+            self.visit(left_arg.right)
+        else:
+            self.visit(left_arg)
 
     def visit_BinOp(self, node: ast.BinOp) -> None:
         if isinstance(node.op, ast.BitOr) and PipelineTracer.get_augmentations(
@@ -90,18 +119,76 @@ class _ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
         else:
             self.generic_visit(node)
 
-    def get_placeholder_names(self, node: ast.AST) -> list[str]:
+    def __call__(self, node: ast.AST) -> None:
+        self.arg_node_id_to_placeholder_name.clear()
         self.placeholder_names.clear()
         self.visit(node)
-        return list(self.placeholder_names)
+
+    def get_placeholder_names(self, node: ast.AST) -> list[str]:
+        self(node)
+        return self.placeholder_names
 
 
-def is_macro(node: ast.AST) -> bool:
+def is_static_macro(node: ast.AST) -> bool:
     return (
         isinstance(node, ast.Subscript)
         and isinstance(node.value, ast.Name)
-        and node.value.id in MacroTracer.macros
+        and node.value.id in MacroTracer.static_macros
     )
+
+
+def is_dynamic_macro(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Name)
+        and node.value.id in MacroTracer.dynamic_macros
+    )
+
+
+class DynamicMacroArgSubstitutor(ast.NodeTransformer):
+    def __init__(
+        self, arg_node_ids: list[int], arg_node_subst_exprs: list[ast.expr]
+    ) -> None:
+        self.arg_node_ids = arg_node_ids
+        self.arg_node_subst_exprs = arg_node_subst_exprs
+
+    def generic_visit(self, node: ast.AST) -> ast.AST:
+        if id(node) in self.arg_node_ids:
+            return self.arg_node_subst_exprs[self.arg_node_ids.index(id(node))]
+        else:
+            return super().generic_visit(node)
+
+
+class DynamicMacro:
+    def __init__(self, template: ast.expr) -> None:
+        self.template = template
+
+    def __call__(self, args: ast.expr) -> ast.expr:
+        template_copy: ast.expr = StatementMapper.bookkeeping_propagating_copy(
+            self.template
+        )
+        arg_replacer = MacroTracer.instance().arg_replacer
+        with arg_replacer.macro_visit_context():
+            arg_replacer(template_copy)
+        arg_node_ids = list(arg_replacer.arg_node_id_to_placeholder_name)
+        expanded_args: list[ast.expr] = [args]
+        if len(arg_node_ids) > 1:
+            if not isinstance(args, ast.Tuple):
+                raise ValueError(
+                    "Need multiple args but unable to expand singleton subscript arg"
+                )
+            expanded_args = args.elts
+        if len(arg_node_ids) != len(expanded_args):
+            raise ValueError(
+                "Wrong number of arguments to macro: expected %d but got %d"
+                % (len(arg_node_ids), len(expanded_args))
+            )
+        substitutor = DynamicMacroArgSubstitutor(arg_node_ids, expanded_args)
+        return substitutor.visit(template_copy)
+
+    def __getitem__(self, *_, **__):
+        # will get filled in by the tracer
+        ...
 
 
 class MacroTracer(pyc.BaseTracer):
@@ -110,7 +197,7 @@ class MacroTracer(pyc.BaseTracer):
     global_guards_enabled = False
     multiple_threads_allowed = True
 
-    macros = {
+    static_macros = {
         context.__name__: context,
         do.__name__: do,
         expect.__name__: expect,
@@ -119,6 +206,7 @@ class MacroTracer(pyc.BaseTracer):
         future.__name__: future,
         filter.__name__: filter,
         "ifilter": filter,
+        "macro": None,
         map.__name__: map,
         "imap": map,
         memoize.__name__: memoize,
@@ -135,7 +223,11 @@ class MacroTracer(pyc.BaseTracer):
         write.__name__: write,
     }
 
-    assert set(pipescript.api.macros.__all__) <= set(macros.keys())
+    dynamic_macros: dict[str, DynamicMacro] = {}
+
+    assert set(pipescript.api.macros.__all__) <= set(static_macros.keys())
+
+    _not_found = object()
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -143,7 +235,7 @@ class MacroTracer(pyc.BaseTracer):
         self.lambda_cache: dict[tuple[int, int, TraceEvent], Any] = {}
         self._overridden_builtins: list[str] = []
         user_ns = get_user_ns()
-        for macro_name, macro in self.macros.items():
+        for macro_name, macro in (self.static_macros | self.dynamic_macros).items():
             if hasattr(builtins, macro_name):
                 continue
             setattr(builtins, macro_name, macro)
@@ -164,11 +256,38 @@ class MacroTracer(pyc.BaseTracer):
 
     _identity_subscript = _IdentitySubscript()
 
-    @pyc.before_subscript_load(when=is_macro, reentrant=True)
-    def load_macro_result(self, _ret, *_, **__):
+    @pyc.before_subscript_load(when=is_dynamic_macro, reentrant=True)
+    def ignore_dynamic_macro_slice(self, *_, **__):
         return self._identity_subscript
 
-    _not_found = object()
+    @pyc.before_subscript_slice(when=is_dynamic_macro, reentrant=True)
+    def perform_dynamic_macro_substitution(
+        self,
+        _ret,
+        node: ast.Subscript,
+        frame: FrameType,
+        evt: TraceEvent,
+        *_,
+        **__,
+    ):
+        lambda_cache_key = (id(node), id(frame), evt)
+        cached_lambda = self.lambda_cache.get(lambda_cache_key, self._not_found)
+        if cached_lambda is not self._not_found:
+            return cached_lambda
+        __hide_pyccolo_frame__ = True
+        assert isinstance(node.value, ast.Name)
+        macro_instance = self.dynamic_macros[node.value.id]
+        macro_substitution_expr = macro_instance(node.slice)
+        evaluated_lambda = pyc.eval(
+            macro_substitution_expr, frame.f_globals, frame.f_locals
+        )
+        ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731
+        self.lambda_cache[lambda_cache_key] = ret
+        return ret
+
+    @pyc.before_subscript_load(when=is_static_macro, reentrant=True)
+    def load_macro_result(self, *_, **__):
+        return self._identity_subscript
 
     def _transform_ast_lambda_for_macro(
         self,
@@ -253,7 +372,7 @@ class MacroTracer(pyc.BaseTracer):
                     keywords=[],
                 )
         ast_lambda.body = lambda_body
-        if func in self.macros and func not in (
+        if func in self.static_macros and func not in (
             "f",
             memoize.__name__,
             otherwise.__name__,
@@ -328,7 +447,7 @@ class MacroTracer(pyc.BaseTracer):
         cast(ast.Call, expr).args[0] = fast.Constant(value=callpoint_id)
         return expr
 
-    @pyc.before_subscript_slice(when=is_macro, reentrant=True)
+    @pyc.before_subscript_slice(when=is_static_macro, reentrant=True)
     def handle_macro(
         self, _ret, node: ast.Subscript, frame: FrameType, evt: TraceEvent, *_, **__
     ):
@@ -339,7 +458,12 @@ class MacroTracer(pyc.BaseTracer):
         __hide_pyccolo_frame__ = True
         func = cast(ast.Name, node.value).id
         callable_expr: ast.expr
-        if func in (fork.__name__, parallel.__name__) and isinstance(
+        if func == "macro":
+            macro = DynamicMacro(node.slice)
+            ret = lambda: __hide_pyccolo_frame__ and macro  # noqa: E731
+            self.lambda_cache[lambda_cache_key] = ret
+            return ret
+        elif func in (fork.__name__, parallel.__name__) and isinstance(
             node.slice, ast.Tuple
         ):
             callables: list[ast.expr] = []

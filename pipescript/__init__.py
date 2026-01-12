@@ -24,6 +24,21 @@ def clear_tracer_stacks(*_, **__) -> None:
     PipelineTracer.instance().clear_stacks()
 
 
+def identify_dynamic_macros(*_, **__) -> None:
+    from IPython import get_ipython
+
+    from pipescript.tracers.macro_tracer import DynamicMacro, MacroTracer
+
+    shell = get_ipython()
+    if shell is None:
+        return
+    user_ns = shell.user_ns
+    MacroTracer.dynamic_macros.clear()
+    for k, v in user_ns.items():
+        if isinstance(v, DynamicMacro):
+            MacroTracer.dynamic_macros[k] = v
+
+
 def load_ipython_extension(shell: InteractiveShell) -> None:
     from ipyflow.shell.interactiveshell import IPyflowInteractiveShell
 
@@ -47,6 +62,7 @@ def load_ipython_extension(shell: InteractiveShell) -> None:
         f"register {OptionalChainingTracer.__module__}.{OptionalChainingTracer.__name__}",
     )
     shell.events.register("post_run_cell", clear_tracer_stacks)
+    shell.events.register("post_run_cell", identify_dynamic_macros)
     patch_completer(shell.Completer)
 
 
@@ -56,6 +72,7 @@ def unload_ipython_extension(shell: InteractiveShell) -> None:
     from pipescript.tracers.pipeline_tracer import PipelineTracer
 
     unpatch_completer(shell.Completer)
+    shell.events.unregister("post_run_cell", identify_dynamic_macros)
     shell.events.unregister("post_run_cell", clear_tracer_stacks)
     shell.run_line_magic(
         "flow",
