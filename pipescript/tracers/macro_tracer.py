@@ -170,7 +170,10 @@ class DynamicMacro:
         with arg_replacer.macro_visit_context():
             arg_replacer(template_copy)
         arg_node_id_to_placeholder_name = arg_replacer.arg_node_id_to_placeholder_name
-        ordered_arg_names = list(arg_node_id_to_placeholder_name.values())
+        ordered_arg_names: list[str] = []
+        for arg_name in arg_node_id_to_placeholder_name.values():
+            if arg_name not in ordered_arg_names:
+                ordered_arg_names.append(arg_name)
         expanded_args: list[ast.expr] = [args]
         if len(ordered_arg_names) > 1:
             if not isinstance(args, (ast.List, ast.Tuple)):
@@ -187,10 +190,6 @@ class DynamicMacro:
             arg_node_id_to_placeholder_name, ordered_arg_names, expanded_args
         )
         return substitutor.visit(template_copy)
-
-    def __getitem__(self, *_, **__):
-        # will get filled in by the tracer
-        ...
 
 
 class MacroTracer(pyc.BaseTracer):
