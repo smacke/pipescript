@@ -130,6 +130,12 @@ class PipelineTracer(pyc.BaseTracer):
     global_guards_enabled = False
     multiple_threads_allowed = True
 
+    macro_arg_placeholder_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix,
+        token="$$",
+        replacement="_",
+    )
+
     pipeline_dict_op_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.binop, token="**|>", replacement="|"
     )
@@ -243,12 +249,6 @@ class PipelineTracer(pyc.BaseTracer):
 
     partial_call_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.call, token="$(", replacement="("
-    )
-
-    macro_arg_placeholder_spec = pyc.AugmentationSpec(
-        aug_type=pyc.AugmentationType.dot_prefix,
-        token="$$",
-        replacement="_",
     )
 
     arg_placeholder_spec = pyc.AugmentationSpec(
