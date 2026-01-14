@@ -60,3 +60,9 @@ def test_pipeline_recursive_macro_expansion():
     )
     assert pyc.eval("flip[0]") == 1
     assert pyc.eval("flip[1]") == 0
+
+
+def test_macro_arg_order():
+    refresh_dynamic_macros(pyc.exec("flip = macro[($$b, $$a), a, b]"))
+    assert pyc.eval("flip[0, 1]") == (1, 0)
+    assert pyc.eval("flip[1, 0]") == (0, 1)

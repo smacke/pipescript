@@ -159,10 +159,11 @@ class DynamicMacroArgSubstitutor(ast.NodeTransformer):
 
 
 class DynamicMacro:
-    def __init__(self, template: ast.expr) -> None:
+    def __init__(self, template: ast.expr, ordered_arg_names: list[str]) -> None:
         self.template = template
+        self.ordered_arg_names = ordered_arg_names
 
-    def __call__(self, args: ast.expr) -> ast.expr:
+    def expand(self, args: ast.expr) -> ast.expr:
         template_copy: ast.expr = StatementMapper.bookkeeping_propagating_copy(
             self.template
         )
@@ -170,7 +171,7 @@ class DynamicMacro:
         with arg_replacer.macro_visit_context():
             arg_replacer(template_copy)
         arg_node_id_to_placeholder_name = arg_replacer.arg_node_id_to_placeholder_name
-        ordered_arg_names: list[str] = []
+        ordered_arg_names = list(self.ordered_arg_names)
         for arg_name in arg_node_id_to_placeholder_name.values():
             if arg_name not in ordered_arg_names:
                 ordered_arg_names.append(arg_name)
@@ -278,7 +279,7 @@ class MacroTracer(pyc.BaseTracer):
         __hide_pyccolo_frame__ = True
         assert isinstance(node.value, ast.Name)
         macro_instance = self.dynamic_macros[node.value.id]
-        expanded_macro_expr = macro_instance(node.slice)
+        expanded_macro_expr = macro_instance.expand(node.slice)
         evaluated_lambda = pyc.eval(
             expanded_macro_expr, frame.f_globals, frame.f_locals
         )
@@ -460,7 +461,19 @@ class MacroTracer(pyc.BaseTracer):
         func = cast(ast.Name, node.value).id
         callable_expr: ast.expr
         if func == "macro":
-            macro = DynamicMacro(node.slice)
+            if (
+                isinstance(node.slice, ast.Tuple)
+                and len(node.slice.elts) > 1
+                and all(isinstance(elt, ast.Name) for elt in node.slice.elts[1:])
+            ):
+                macro_template = node.slice.elts[0]
+                ordered_arg_names = [
+                    cast(ast.Name, elt).id for elt in node.slice.elts[1:]
+                ]
+            else:
+                macro_template = node.slice
+                ordered_arg_names = []
+            macro = DynamicMacro(macro_template, ordered_arg_names)
             ret = lambda: __hide_pyccolo_frame__ and macro  # noqa: E731
             self.lambda_cache[lambda_cache_key] = ret
             return ret
