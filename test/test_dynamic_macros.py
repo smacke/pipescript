@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import textwrap
 from typing import Any, Generator
+from unittest.mock import patch
 
 import pyccolo as pyc
 import pytest
 
+import pipescript.utils
 from pipescript.tracers.macro_tracer import DynamicMacro, MacroTracer
 from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
 from pipescript.tracers.pipeline_tracer import PipelineTracer
@@ -66,3 +69,40 @@ def test_macro_arg_order():
     refresh_dynamic_macros(pyc.exec("flip = macro[($$b, $$a), a, b]"))
     assert pyc.eval("flip[0, 1]") == (1, 0)
     assert pyc.eval("flip[1, 0]") == (0, 1)
+
+
+def test_macro_with_callable():
+    env = pyc.exec(
+        textwrap.dedent(
+            """
+            import ast
+
+            class BinaryOpExtractor(ast.NodeVisitor):
+                def __init__(self):
+                    self.op = None
+
+                def visit_BinOp(self, node):
+                    self.op = node.op
+
+                def __call__(self, node):
+                    self.visit(node)
+                    if self.op is None:
+                        raise ValueError("no unary op in expr")
+                    elif isinstance(self.op, ast.Add):
+                        return f[$ + $]
+                    elif isinstance(self.op, ast.Sub):
+                        return f[$ - $]
+                    elif isinstance(self.op, ast.Mult):
+                        return f[$ * $]
+                    elif isinstance(self.op, ast.Div):
+                        return f[$ / $]
+            """.strip(
+                "\n"
+            )
+        ),
+    )
+    with patch.object(
+        pipescript.utils, pipescript.utils._get_user_ns_impl.__name__, return_value=env
+    ):
+        refresh_dynamic_macros(pyc.exec("opf = macro[BinaryOpExtractor]"))
+    assert pyc.eval("op[+](1, 1)") == 2

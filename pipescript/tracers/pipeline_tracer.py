@@ -20,7 +20,7 @@ from pipescript.analysis.placeholders import (
     PlaceholderReplacer,
     SingletonArgCounterMixin,
 )
-from pipescript.api.macros import fork, parallel
+from pipescript.api.static_macros import fork, parallel
 from pipescript.api.utils import (
     _dynamic_lookup,
     collapse,
@@ -129,6 +129,182 @@ class PipelineTracer(pyc.BaseTracer):
     allow_reentrant_events = True
     global_guards_enabled = False
     multiple_threads_allowed = True
+
+    add_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[+]", replacement="f[$ + $]"
+    )
+    sub_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[-]", replacement="f[$ - $]"
+    )
+    mul_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[*]", replacement="f[$ * $]"
+    )
+    matmul_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[@]", replacement="f[$ @ $]"
+    )
+    div_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[/]", replacement="f[$ / $]"
+    )
+    floordiv_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[//]", replacement="f[$ // $]"
+    )
+    mod_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[%]", replacement="f[$ % $]"
+    )
+    pow_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[**]", replacement="f[$ ** $]"
+    )
+    bitor_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[|]", replacement="f[$ | $]"
+    )
+    bitxor_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[^]", replacement="f[$ ^ $]"
+    )
+    bitand_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[&]", replacement="f[$ & $]"
+    )
+    invert_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[~]", replacement="f[~$]"
+    )
+    lshift_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[<<]", replacement="f[$ << $]"
+    )
+    rshift_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[>>]", replacement="f[$ >> $]"
+    )
+    lt_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[<]", replacement="f[$ < $]"
+    )
+    lte_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[<=]", replacement="f[$ <= $]"
+    )
+    gt_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[>]", replacement="f[$ > $]"
+    )
+    gte_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[>=]", replacement="f[$ >= $]"
+    )
+    eq_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[==]", replacement="f[$ == $]"
+    )
+    neq_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[!=]", replacement="f[$ != $]"
+    )
+    booland_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix,
+        token="[and]",
+        replacement="f[$ and $]",
+    )
+    boolor_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[or]", replacement="f[$ or $]"
+    )
+    not_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[not]", replacement="f[not $]"
+    )
+    is_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[is]", replacement="f[$ is $]"
+    )
+    in_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="[in]", replacement="f[$ in $]"
+    )
+    isnot_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix,
+        token="[is not]",
+        replacement="f[$ is not $]",
+    )
+    notin_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix,
+        token="[not in]",
+        replacement="f[$ not in $]",
+    )
+
+    alt_add_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(+)", replacement="f[$ + $]"
+    )
+    alt_sub_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(-)", replacement="f[$ - $]"
+    )
+    alt_mul_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(*)", replacement="f[$ * $]"
+    )
+    alt_matmul_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(@)", replacement="f[$ @ $]"
+    )
+    alt_div_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(/)", replacement="f[$ / $]"
+    )
+    alt_floordiv_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(//)", replacement="f[$ // $]"
+    )
+    alt_mod_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(%)", replacement="f[$ % $]"
+    )
+    alt_pow_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(**)", replacement="f[$ ** $]"
+    )
+    alt_bitor_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(|)", replacement="f[$ | $]"
+    )
+    alt_bitxor_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(^)", replacement="f[$ ^ $]"
+    )
+    alt_bitand_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(&)", replacement="f[$ & $]"
+    )
+    alt_invert_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(~)", replacement="f[~$]"
+    )
+    alt_lshift_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(<<)", replacement="f[$ << $]"
+    )
+    alt_rshift_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(>>)", replacement="f[$ >> $]"
+    )
+    alt_lt_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(<)", replacement="f[$ < $]"
+    )
+    alt_lte_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(<=)", replacement="f[$ <= $]"
+    )
+    alt_gt_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(>)", replacement="f[$ > $]"
+    )
+    alt_gte_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(>=)", replacement="f[$ >= $]"
+    )
+    alt_eq_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(==)", replacement="f[$ == $]"
+    )
+    alt_neq_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(!=)", replacement="f[$ != $]"
+    )
+    alt_booland_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix,
+        token="(and)",
+        replacement="f[$ and $]",
+    )
+    alt_boolor_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(or)", replacement="f[$ or $]"
+    )
+    alt_not_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(not)", replacement="f[not $]"
+    )
+    alt_is_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(is)", replacement="f[$ is $]"
+    )
+    alt_in_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix, token="(in)", replacement="f[$ in $]"
+    )
+    alt_isnot_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix,
+        token="(is not)",
+        replacement="f[$ is not $]",
+    )
+    alt_notin_op_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.dot_prefix,
+        token="(not in)",
+        replacement="f[$ not in $]",
+    )
 
     macro_arg_placeholder_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.dot_prefix,

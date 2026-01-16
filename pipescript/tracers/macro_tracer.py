@@ -17,9 +17,10 @@ from pyccolo.stmt_mapper import StatementMapper
 from pyccolo.trace_events import TraceEvent
 from typing_extensions import Literal
 
-import pipescript.api.macros
+import pipescript.api.static_macros
+from pipescript.analysis.dynamic_macros import DynamicMacro
 from pipescript.analysis.placeholders import SingletonArgCounterMixin
-from pipescript.api.macros import (
+from pipescript.api.static_macros import (
     _ntimes_counters,
     _once_cache,
     context,
@@ -43,7 +44,7 @@ from pipescript.tracers.pipeline_tracer import PipelineTracer
 from pipescript.utils import get_user_ns
 
 
-class _ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
+class ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
     def __init__(self) -> None:
         super().__init__()
         self.placeholder_names: list[str] = []
@@ -140,65 +141,13 @@ def is_dynamic_macro(node: ast.AST) -> bool:
     )
 
 
-class DynamicMacroArgSubstitutor(ast.NodeTransformer):
-    def __init__(
-        self,
-        arg_node_id_to_placeholder_name: dict[int, str],
-        ordered_arg_names: list[str],
-        arg_node_subst_exprs: list[ast.expr],
-    ) -> None:
-        self.arg_node_id_to_placeholder_name = arg_node_id_to_placeholder_name
-        self.ordered_arg_names = ordered_arg_names
-        self.arg_node_subst_exprs = arg_node_subst_exprs
-
-    def visit_Name(self, node: ast.Name) -> ast.AST:
-        arg_name = self.arg_node_id_to_placeholder_name.get(id(node))
-        if arg_name is None:
-            return super().generic_visit(node)
-        return self.arg_node_subst_exprs[self.ordered_arg_names.index(arg_name)]
-
-
-class DynamicMacro:
-    def __init__(self, template: ast.expr, ordered_arg_names: list[str]) -> None:
-        self.template = template
-        self.ordered_arg_names = ordered_arg_names
-
-    def expand(self, args: ast.expr) -> ast.expr:
-        template_copy: ast.expr = StatementMapper.bookkeeping_propagating_copy(
-            self.template
-        )
-        arg_replacer = MacroTracer.instance().arg_replacer
-        with arg_replacer.macro_visit_context():
-            arg_replacer(template_copy)
-        arg_node_id_to_placeholder_name = arg_replacer.arg_node_id_to_placeholder_name
-        ordered_arg_names = list(self.ordered_arg_names)
-        for arg_name in arg_node_id_to_placeholder_name.values():
-            if arg_name not in ordered_arg_names:
-                ordered_arg_names.append(arg_name)
-        expanded_args: list[ast.expr] = [args]
-        if len(ordered_arg_names) > 1:
-            if not isinstance(args, (ast.List, ast.Tuple)):
-                raise ValueError(
-                    "Need multiple args but unable to expand singleton subscript arg"
-                )
-            expanded_args = args.elts
-        if len(ordered_arg_names) != len(expanded_args):
-            raise ValueError(
-                "Wrong number of arguments to macro: expected %d but got %d"
-                % (len(ordered_arg_names), len(expanded_args))
-            )
-        substitutor = DynamicMacroArgSubstitutor(
-            arg_node_id_to_placeholder_name, ordered_arg_names, expanded_args
-        )
-        return substitutor.visit(template_copy)
-
-
 class MacroTracer(pyc.BaseTracer):
 
     allow_reentrant_events = True
     global_guards_enabled = False
     multiple_threads_allowed = True
 
+    # macros ending in 'f' allow us to write stuff like reduce[+]([1, 2, 3])
     static_macros = {
         context.__name__: context,
         do.__name__: do,
@@ -207,10 +156,14 @@ class MacroTracer(pyc.BaseTracer):
         fork.__name__: fork,
         future.__name__: future,
         filter.__name__: filter,
-        "ifilter": filter,
+        f"i{filter.__name__}": filter,
+        f"{filter.__name__}f": filter,
+        f"i{filter.__name__}f": filter,
         "macro": None,
         map.__name__: map,
-        "imap": map,
+        f"i{map.__name__}": map,
+        f"{map.__name__}f": map,
+        f"i{map.__name__}f": map,
         memoize.__name__: memoize,
         ntimes.__name__: ntimes,
         once.__name__: once,
@@ -218,6 +171,7 @@ class MacroTracer(pyc.BaseTracer):
         parallel.__name__: parallel,
         read.__name__: read,
         reduce.__name__: reduce,
+        f"{reduce.__name__}f": reduce,
         repeat.__name__: repeat,
         unless.__name__: unless,
         until.__name__: until,
@@ -227,13 +181,13 @@ class MacroTracer(pyc.BaseTracer):
 
     dynamic_macros: dict[str, DynamicMacro] = {}
 
-    assert set(pipescript.api.macros.__all__) <= set(static_macros.keys())
+    assert set(pipescript.api.static_macros.__all__) <= set(static_macros.keys())
 
     _not_found = object()
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.arg_replacer = _ArgReplacer()
+        self.arg_replacer = ArgReplacer()
         self.lambda_cache: dict[tuple[int, int, TraceEvent], Any] = {}
         self._overridden_builtins: list[str] = []
         user_ns = get_user_ns()
@@ -280,9 +234,12 @@ class MacroTracer(pyc.BaseTracer):
         assert isinstance(node.value, ast.Name)
         macro_instance = self.dynamic_macros[node.value.id]
         expanded_macro_expr = macro_instance.expand(node.slice)
-        evaluated_lambda = pyc.eval(
-            expanded_macro_expr, frame.f_globals, frame.f_locals
-        )
+        if isinstance(expanded_macro_expr, ast.AST):
+            evaluated_lambda = pyc.eval(
+                expanded_macro_expr, frame.f_globals, frame.f_locals
+            )
+        else:
+            evaluated_lambda = expanded_macro_expr
         ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731
         self.lambda_cache[lambda_cache_key] = ret
         return ret
@@ -461,19 +418,7 @@ class MacroTracer(pyc.BaseTracer):
         func = cast(ast.Name, node.value).id
         callable_expr: ast.expr
         if func == "macro":
-            if (
-                isinstance(node.slice, ast.Tuple)
-                and len(node.slice.elts) > 1
-                and all(isinstance(elt, ast.Name) for elt in node.slice.elts[1:])
-            ):
-                macro_template = node.slice.elts[0]
-                ordered_arg_names = [
-                    cast(ast.Name, elt).id for elt in node.slice.elts[1:]
-                ]
-            else:
-                macro_template = node.slice
-                ordered_arg_names = []
-            macro = DynamicMacro(macro_template, ordered_arg_names)
+            macro = DynamicMacro.create(node.slice, self.arg_replacer)
             ret = lambda: __hide_pyccolo_frame__ and macro  # noqa: E731
             self.lambda_cache[lambda_cache_key] = ret
             return ret
