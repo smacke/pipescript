@@ -234,7 +234,7 @@ class MacroTracer(pyc.BaseTracer):
         assert isinstance(node.value, ast.Name)
         macro_instance = self.dynamic_macros[node.value.id]
         expanded_macro_expr = macro_instance.expand(node.slice)
-        if isinstance(expanded_macro_expr, ast.AST):
+        if isinstance(expanded_macro_expr, ast.expr):
             evaluated_lambda = pyc.eval(
                 expanded_macro_expr, frame.f_globals, frame.f_locals
             )
