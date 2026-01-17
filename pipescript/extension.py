@@ -53,10 +53,10 @@ def make_tracing_contexts(
     shell: InteractiveShell, tracers: list[pyc.BaseTracer]
 ) -> tuple[Callable[..., None], Callable[..., None]]:
     inited = False
-    rewriter = tracers[-1].ast_rewriter_cls(tracers, None)
+    rewriter = tracers[-1].ast_rewriter_cls(tracers, "")
 
     def _cleanup_transformer(lines) -> None:
-        rewriter.__init__(tracers, None)
+        rewriter.__init__(tracers, "")  # type: ignore[misc]
         return lines
 
     shell.input_transformers_cleanup.insert(0, _cleanup_transformer)
