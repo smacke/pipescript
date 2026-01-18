@@ -28,6 +28,10 @@ class ExtractNames(ast.NodeVisitor):
             not in self.tracer.augmented_node_ids_by_spec[
                 self.tracer.arg_placeholder_spec
             ]
+            and id(node)
+            not in self.tracer.augmented_node_ids_by_spec[
+                self.tracer.macro_arg_placeholder_spec
+            ]
         ):
             self.names.add(node.id)
 

@@ -84,7 +84,7 @@ class ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
     def visit_Name(self, node: ast.Name) -> None:
         if id(node) not in self.placeholder_nodes:
             return
-        self.placeholder_nodes.remove(id(node))
+        self.placeholder_nodes.discard(id(node))
         assert node.id.startswith("_")
         if node.id == "_":
             node.id = f"_{self.arg_ctr}"
@@ -235,12 +235,23 @@ class MacroTracer(pyc.BaseTracer):
         macro_instance = self.dynamic_macros[node.value.id]
         expanded_macro_expr = macro_instance.expand(node.slice)
         if isinstance(expanded_macro_expr, ast.expr):
+            lambda_body = expanded_macro_expr
+            orig_ctr = self.arg_replacer.arg_ctr
+            self.arg_replacer.arg_ctr = orig_ctr
+            expanded_macro_expr, *_extra = self.arg_replacer.create_placeholder_lambda(
+                [],
+                self.arg_replacer.arg_ctr,
+                expanded_macro_expr,
+                frame,
+            )
+            expanded_macro_expr.body = lambda_body
             evaluated_lambda = pyc.eval(
                 expanded_macro_expr, frame.f_globals, frame.f_locals
             )
+            ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda()  # noqa: E731
         else:
             evaluated_lambda = expanded_macro_expr
-        ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731
+            ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731
         self.lambda_cache[lambda_cache_key] = ret
         return ret
 
@@ -298,7 +309,11 @@ class MacroTracer(pyc.BaseTracer):
         return functor_lambda
 
     def _handle_macro_impl(
-        self, orig_lambda_body: ast.expr, frame: FrameType, func: str
+        self,
+        orig_lambda_body: ast.expr,
+        frame: FrameType,
+        func: str,
+        allow_call_node: bool = True,
     ) -> ast.expr:
         __hide_pyccolo_frame__ = True  # noqa: F841
         orig_ctr = self.arg_replacer.arg_ctr
@@ -317,7 +332,7 @@ class MacroTracer(pyc.BaseTracer):
             )
         )
         lambda_body = modified_lambda_body or lambda_body
-        if needs_call_node:
+        if needs_call_node and allow_call_node:
             with fast.location_of(lambda_body):
                 load = ast.Load()
                 lambda_body = fast.Call(
@@ -418,7 +433,7 @@ class MacroTracer(pyc.BaseTracer):
         func = cast(ast.Name, node.value).id
         callable_expr: ast.expr
         if func == "macro":
-            macro = DynamicMacro.create(node.slice, self.arg_replacer)
+            macro = DynamicMacro.create(node.slice, self)
             ret = lambda: __hide_pyccolo_frame__ and macro  # noqa: E731
             self.lambda_cache[lambda_cache_key] = ret
             return ret

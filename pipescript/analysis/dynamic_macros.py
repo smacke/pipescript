@@ -8,12 +8,9 @@ from pyccolo.stmt_mapper import StatementMapper
 from pipescript.utils import get_user_ns
 
 if TYPE_CHECKING:
-    from pipescript.tracers.macro_tracer import ArgReplacer
+    from pipescript.tracers.macro_tracer import ArgReplacer, MacroTracer
 
     CallableNodeTransformer = Callable[[ast.expr], ast.expr]
-
-
-ast.UAdd
 
 
 class DynamicMacroArgSubstitutor(ast.NodeTransformer):
@@ -22,10 +19,21 @@ class DynamicMacroArgSubstitutor(ast.NodeTransformer):
         arg_node_id_to_placeholder_name: dict[int, str],
         ordered_arg_names: list[str],
         arg_node_subst_exprs: list[ast.expr],
+        dynamic_macros: dict[str, DynamicMacro],
     ) -> None:
         self.arg_node_id_to_placeholder_name = arg_node_id_to_placeholder_name
         self.ordered_arg_names = ordered_arg_names
         self.arg_node_subst_exprs = arg_node_subst_exprs
+        self.dynamic_macros = dynamic_macros
+
+    def visit_Subscript(self, node: ast.Subscript) -> ast.AST:
+        if not isinstance(node.value, ast.Name):
+            return self.generic_visit(node)
+        dynamic_macro = self.dynamic_macros.get(node.value.id)
+        if not isinstance(dynamic_macro, TemplateDynamicMacro):
+            return self.generic_visit(node)
+        expanded = dynamic_macro.expand(node.slice)
+        return expanded
 
     def visit_Name(self, node: ast.Name) -> ast.AST:
         arg_name = self.arg_node_id_to_placeholder_name.get(id(node))
@@ -39,7 +47,7 @@ class DynamicMacro:
         raise NotImplementedError()
 
     @classmethod
-    def create(cls, node_slice: ast.expr, arg_replacer: ArgReplacer) -> DynamicMacro:
+    def create(cls, node_slice: ast.expr, tracer: MacroTracer) -> DynamicMacro:
         if (
             isinstance(node_slice, ast.Tuple)
             and len(node_slice.elts) > 1
@@ -56,7 +64,7 @@ class DynamicMacro:
             if user_ns is not None and macro_template.id in user_ns:
                 transformer = user_ns[macro_template.id]
         if transformer is None or not callable(transformer):
-            return TemplateDynamicMacro(macro_template, ordered_arg_names, arg_replacer)
+            return TemplateDynamicMacro(macro_template, ordered_arg_names, tracer)
         else:
             return TransformerDynamicMacro(transformer)
 
@@ -66,11 +74,19 @@ class TemplateDynamicMacro(DynamicMacro):
         self,
         template: ast.expr,
         ordered_arg_names: list[str],
-        arg_replacer: ArgReplacer,
+        tracer: MacroTracer,
     ) -> None:
         self.template = template
         self.ordered_arg_names = ordered_arg_names
-        self.arg_replacer = arg_replacer
+        self.tracer = tracer
+
+    @property
+    def arg_replacer(self) -> ArgReplacer:
+        return self.tracer.arg_replacer
+
+    @property
+    def dynamic_macros(self) -> dict[str, DynamicMacro]:
+        return self.tracer.dynamic_macros
 
     def expand(self, args: ast.expr) -> ast.expr:
         template_copy: ast.expr = StatementMapper.bookkeeping_propagating_copy(
@@ -78,7 +94,7 @@ class TemplateDynamicMacro(DynamicMacro):
         )
         with self.arg_replacer.macro_visit_context():
             self.arg_replacer(template_copy)
-        arg_node_id_to_placeholder_name = (
+        arg_node_id_to_placeholder_name = dict(
             self.arg_replacer.arg_node_id_to_placeholder_name
         )
         ordered_arg_names = list(self.ordered_arg_names)
@@ -98,7 +114,10 @@ class TemplateDynamicMacro(DynamicMacro):
                 % (len(ordered_arg_names), len(expanded_args))
             )
         substitutor = DynamicMacroArgSubstitutor(
-            arg_node_id_to_placeholder_name, ordered_arg_names, expanded_args
+            arg_node_id_to_placeholder_name,
+            ordered_arg_names,
+            expanded_args,
+            self.dynamic_macros,
         )
         return substitutor.visit(template_copy)
 

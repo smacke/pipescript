@@ -106,3 +106,18 @@ def test_macro_with_callable():
     ):
         refresh_dynamic_macros(pyc.exec("opf = macro[BinaryOpExtractor]"))
     assert pyc.eval("op[+](1, 1)") == 2
+
+
+def test_local_variable_references_in_dynamic_macro_body_expanding_to_pipeline():
+    env = pyc.exec("add_x = macro[$$ |> $ + x]\nx=42\nz=2")
+    refresh_dynamic_macros(env)
+    assert pyc.eval("add_x[1]", global_env=env, local_env=env) == 43
+    assert pyc.eval("add_x[x]", global_env=env, local_env=env) == 84
+    assert pyc.eval("add_x[z]", global_env=env, local_env=env) == 44
+    env = pyc.exec("def foo(y):\n    return add_x[y]", global_env=env, local_env=env)
+    assert pyc.eval("foo(1)", global_env=env, local_env=env) == 43
+    assert pyc.eval("foo(1)", global_env=env, local_env=env) == 43
+    env = pyc.exec("bar = macro[foo($$)]", global_env=env, local_env=env)
+    refresh_dynamic_macros(env)
+    assert pyc.eval("bar[1]", global_env=env, local_env=env) == 43
+    assert pyc.eval("bar[1]", global_env=env, local_env=env) == 43
