@@ -1,6 +1,13 @@
 History
 =======
 
+0.0.11 (2026-01-18)
+-------------------
+* Implement custom dynamic macros;
+* Support numbered arguments;
+* Eliminate ipyflow dependency;
+* Add console entrypoint;
+
 0.0.10 (2026-01-09)
 -------------------
 *  Bump dependencies with range-based augmentation detection bugfix;
