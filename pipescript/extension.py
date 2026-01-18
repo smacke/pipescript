@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import inspect
 import os
 from types import FrameType, TracebackType
@@ -112,19 +113,15 @@ def filter_hidden_frames(tb: TracebackType | None) -> None:
         tb = tb.tb_next
 
 
-def except_handler(
-    shell: InteractiveShell,
-    etype: type[Exception],
-    exc: Exception,
-    tb: TracebackType,
-    tb_offset: int | None = None,
-) -> None:
-    if os.getenv(PYCCOLO_DEV_MODE_ENV_VAR) != "1":
-        filter_hidden_frames(tb)
-    if tb_offset is None:
-        shell.showtraceback((etype, exc, tb))
-    else:
-        shell.showtraceback((etype, exc, tb), tb_offset=tb_offset)
+def make_patched_showtraceback(orig_showtraceback):
+    @functools.wraps(orig_showtraceback)
+    def patched_showtraceback(self, *args, **kwargs):
+        if os.getenv(PYCCOLO_DEV_MODE_ENV_VAR) != "1":
+            *_, tb = self._get_exc_info(kwargs.get("exc_tuple"))
+            filter_hidden_frames(tb)
+        orig_showtraceback(self, *args, **kwargs)
+
+    return patched_showtraceback
 
 
 def load_ipython_extension(shell: InteractiveShell) -> None:
@@ -137,7 +134,11 @@ def load_ipython_extension(shell: InteractiveShell) -> None:
     shell.events.register("post_run_cell", exit_context)
     shell.events.register("post_run_cell", clear_tracer_stacks)
     shell.events.register("post_run_cell", identify_dynamic_macros)
-    shell.set_custom_exc((Exception,), except_handler)
+    # monkey patch instead of using set_custom_exc so that
+    # we don't interfere with other callers of set_custom_exc
+    shell.__class__.showtraceback = make_patched_showtraceback(  # type: ignore[method-assign]
+        shell.__class__.showtraceback
+    )
     patch_completer(shell.Completer)
 
 
