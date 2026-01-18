@@ -1,6 +1,8 @@
 from __future__ import annotations
+from typing import TYPE_CHECKING
 
-from IPython.core.completer import Completer, Completion
+if TYPE_CHECKING:
+    from IPython.core.completer import Completer, Completion
 
 
 def patch_completer(completer: Completer) -> None:
