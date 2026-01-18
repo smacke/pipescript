@@ -92,6 +92,8 @@ class ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
         else:
             if node.id[1].isalpha():
                 node.id = node.id[1:]
+            elif node.id[1].isdigit():
+                node.id = "_" + node.id
             if node.id not in self.placeholder_names:
                 self.placeholder_names.append(node.id)
         self.arg_node_id_to_placeholder_name[id(node)] = node.id

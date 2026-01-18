@@ -8,6 +8,7 @@ import pyccolo as pyc
 import pytest
 
 import pipescript.utils
+from pipescript.analysis.placeholders import SingletonArgCounterMixin
 from pipescript.tracers.macro_tracer import MacroTracer
 from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
 from pipescript.tracers.pipeline_tracer import PipelineTracer
@@ -203,6 +204,13 @@ def test_keyword_placeholder():
 def test_named_placeholders_simple():
     assert pyc.eval("reduce[$x + $y]([1, 2, 3])") == 6
     assert pyc.eval("sorted($lst, reverse=True)([1, 2, 3])") == [3, 2, 1]
+
+
+def test_named_placeholders_multiple_appearances():
+    assert pyc.eval("(2, 3, 4) *|> f[$a*$b + $b*$c + $a*$c]") == 26
+    # reset the placeholder counter to trigger a collision if we don't handle explicit digit placeholders properly
+    SingletonArgCounterMixin._arg_ctr = 0
+    assert pyc.eval("(1, 1, 2, 3, 4) *|> f[$1*$2 + $2*$3 + $1*$3 + $ + $]") == 28
 
 
 def test_named_placeholders_complex():
