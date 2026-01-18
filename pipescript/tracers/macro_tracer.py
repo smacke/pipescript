@@ -245,9 +245,18 @@ class MacroTracer(pyc.BaseTracer):
                 frame,
             )
             expanded_macro_expr.body = lambda_body
-            evaluated_lambda = pyc.eval(
+            callable_func = pyc.eval(
                 expanded_macro_expr, frame.f_globals, frame.f_locals
-            )()
+            )
+            try:
+                evaluated_lambda = callable_func()
+            except Exception as e:
+                exc = e
+
+                def raises_error():
+                    raise exc
+
+                return lambda: __hide_pyccolo_frame__ and raises_error()
             ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731
         else:
             evaluated_lambda = expanded_macro_expr
