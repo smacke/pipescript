@@ -121,3 +121,8 @@ def test_local_variable_references_in_dynamic_macro_body_expanding_to_pipeline()
     refresh_dynamic_macros(env)
     assert pyc.eval("bar[1]", global_env=env, local_env=env) == 43
     assert pyc.eval("bar[1]", global_env=env, local_env=env) == 43
+    env = pyc.exec(
+        "add_x_z = macro[z |> add_x[$] |> $ + $$]", global_env=env, local_env=env
+    )
+    refresh_dynamic_macros(env)
+    assert pyc.eval("add_x_z[1]", global_env=env, local_env=env) == 45
