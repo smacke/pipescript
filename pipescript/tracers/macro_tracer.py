@@ -247,8 +247,8 @@ class MacroTracer(pyc.BaseTracer):
             expanded_macro_expr.body = lambda_body
             evaluated_lambda = pyc.eval(
                 expanded_macro_expr, frame.f_globals, frame.f_locals
-            )
-            ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda()  # noqa: E731
+            )()
+            ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731
         else:
             evaluated_lambda = expanded_macro_expr
             ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731

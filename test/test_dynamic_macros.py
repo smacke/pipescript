@@ -126,3 +126,10 @@ def test_local_variable_references_in_dynamic_macro_body_expanding_to_pipeline()
     )
     refresh_dynamic_macros(env)
     assert pyc.eval("add_x_z[1]", global_env=env, local_env=env) == 45
+
+
+def test_macros_are_run_once():
+    env = pyc.exec("foreach = macro[$$ |> map[do[$$]] |> list |> null]\nlst=[]")
+    refresh_dynamic_macros(env)
+    env = pyc.exec("foreach[range(10), lst.append($)]", global_env=env, local_env=env)
+    assert pyc.eval("lst", global_env=env, local_env=env) == list(range(10))
