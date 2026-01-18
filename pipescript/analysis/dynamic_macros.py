@@ -20,16 +20,20 @@ class DynamicMacroArgSubstitutor(ast.NodeTransformer):
         ordered_arg_names: list[str],
         arg_node_subst_exprs: list[ast.expr],
         dynamic_macros: dict[str, DynamicMacro],
+        method_dynamic_macros: dict[str, DynamicMacro],
     ) -> None:
         self.arg_node_id_to_placeholder_name = arg_node_id_to_placeholder_name
         self.ordered_arg_names = ordered_arg_names
         self.arg_node_subst_exprs = arg_node_subst_exprs
         self.dynamic_macros = dynamic_macros
+        self.method_dynamic_macros = dynamic_macros
 
     def visit_Subscript(self, node: ast.Subscript) -> ast.AST:
         if not isinstance(node.value, ast.Name):
             return self.generic_visit(node)
-        dynamic_macro = self.dynamic_macros.get(node.value.id)
+        dynamic_macro = self.dynamic_macros.get(
+            node.value.id, self.method_dynamic_macros.get(node.value.id)
+        )
         if not isinstance(dynamic_macro, TemplateDynamicMacro):
             return self.generic_visit(node)
         expanded = dynamic_macro.expand(node.slice)
@@ -43,11 +47,20 @@ class DynamicMacroArgSubstitutor(ast.NodeTransformer):
 
 
 class DynamicMacro:
+    def __init__(self, is_method: bool) -> None:
+        self._is_method = is_method
+
+    @property
+    def is_method(self) -> bool:
+        return self._is_method
+
     def expand(self, args: ast.expr) -> ast.expr | Any:
         raise NotImplementedError()
 
     @classmethod
-    def create(cls, node_slice: ast.expr, tracer: MacroTracer) -> DynamicMacro:
+    def create(
+        cls, node_slice: ast.expr, tracer: MacroTracer, is_method: bool
+    ) -> DynamicMacro:
         if (
             isinstance(node_slice, ast.Tuple)
             and len(node_slice.elts) > 1
@@ -64,9 +77,11 @@ class DynamicMacro:
             if user_ns is not None and macro_template.id in user_ns:
                 transformer = user_ns[macro_template.id]
         if transformer is None or not callable(transformer):
-            return TemplateDynamicMacro(macro_template, ordered_arg_names, tracer)
+            return TemplateDynamicMacro(
+                macro_template, ordered_arg_names, tracer, is_method
+            )
         else:
-            return TransformerDynamicMacro(transformer)
+            return TransformerDynamicMacro(transformer, is_method)
 
 
 class TemplateDynamicMacro(DynamicMacro):
@@ -75,7 +90,9 @@ class TemplateDynamicMacro(DynamicMacro):
         template: ast.expr,
         ordered_arg_names: list[str],
         tracer: MacroTracer,
+        is_method: bool,
     ) -> None:
+        super().__init__(is_method)
         self.template = template
         self.ordered_arg_names = ordered_arg_names
         self.tracer = tracer
@@ -87,6 +104,10 @@ class TemplateDynamicMacro(DynamicMacro):
     @property
     def dynamic_macros(self) -> dict[str, DynamicMacro]:
         return self.tracer.dynamic_macros
+
+    @property
+    def dynamic_method_macros(self) -> dict[str, DynamicMacro]:
+        return self.tracer.dynamic_method_macros
 
     def expand(self, args: ast.expr) -> ast.expr:
         template_copy: ast.expr = StatementMapper.bookkeeping_propagating_copy(
@@ -118,14 +139,18 @@ class TemplateDynamicMacro(DynamicMacro):
             ordered_arg_names,
             expanded_args,
             self.dynamic_macros,
+            self.dynamic_method_macros,
         )
         return substitutor.visit(template_copy)
 
 
 class TransformerDynamicMacro(DynamicMacro):
     def __init__(
-        self, transformer: CallableNodeTransformer | type[CallableNodeTransformer]
+        self,
+        transformer: CallableNodeTransformer | type[CallableNodeTransformer],
+        is_method: bool,
     ) -> None:
+        super().__init__(is_method)
         self.transformer = transformer
 
     def expand(self, args: ast.expr) -> ast.expr:

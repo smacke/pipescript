@@ -24,7 +24,11 @@ def all_tracers() -> Generator[None, None, None]:
 
 def refresh_dynamic_macros(env: dict[str, Any]) -> None:
     for k, v in env.items():
-        if isinstance(v, DynamicMacro):
+        if not isinstance(v, DynamicMacro):
+            continue
+        if v.is_method:
+            MacroTracer.dynamic_method_macros[k] = v
+        else:
             MacroTracer.dynamic_macros[k] = v
     MacroTracer.instance().reset()
 
@@ -133,3 +137,18 @@ def test_macros_are_run_once():
     refresh_dynamic_macros(env)
     env = pyc.exec("foreach[range(10), lst.append($)]", global_env=env, local_env=env)
     assert pyc.eval("lst", global_env=env, local_env=env) == list(range(10))
+
+
+def test_simple_method_macro():
+    env = pyc.exec("foreach = method[$$ |> map[do[$$]] |> list |> null]\nlst=[]")
+    refresh_dynamic_macros(env)
+    env = pyc.exec("range(10).foreach[lst.append]", global_env=env, local_env=env)
+    assert pyc.eval("lst", global_env=env, local_env=env) == list(range(10))
+    env = pyc.exec("range(10).foreach[lst.append($)]", global_env=env, local_env=env)
+    assert pyc.eval("lst", global_env=env, local_env=env) == list(range(10)) * 2
+    env = pyc.exec("range(10).foreach[$ |> lst.append]", global_env=env, local_env=env)
+    assert pyc.eval("lst", global_env=env, local_env=env) == list(range(10)) * 3
+    env = pyc.exec(
+        "range(10).foreach[$ |> lst.append($)]", global_env=env, local_env=env
+    )
+    assert pyc.eval("lst", global_env=env, local_env=env) == list(range(10)) * 4

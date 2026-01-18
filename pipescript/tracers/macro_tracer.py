@@ -143,6 +143,19 @@ def is_dynamic_macro(node: ast.AST) -> bool:
     )
 
 
+def is_dynamic_method_macro_attribute(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr in MacroTracer.dynamic_method_macros
+    )
+
+
+def is_dynamic_method_macro(node: ast.AST) -> bool:
+    return isinstance(node, ast.Subscript) and is_dynamic_method_macro_attribute(
+        node.value
+    )
+
+
 class MacroTracer(pyc.BaseTracer):
 
     allow_reentrant_events = True
@@ -167,6 +180,7 @@ class MacroTracer(pyc.BaseTracer):
         f"{map.__name__}f": map,
         f"i{map.__name__}f": map,
         memoize.__name__: memoize,
+        "method": None,
         ntimes.__name__: ntimes,
         once.__name__: once,
         otherwise.__name__: otherwise,
@@ -183,6 +197,8 @@ class MacroTracer(pyc.BaseTracer):
 
     dynamic_macros: dict[str, DynamicMacro] = {}
 
+    dynamic_method_macros: dict[str, DynamicMacro] = {}
+
     assert set(pipescript.api.static_macros.__all__) <= set(static_macros.keys())
 
     _not_found = object()
@@ -193,7 +209,9 @@ class MacroTracer(pyc.BaseTracer):
         self.lambda_cache: dict[tuple[int, int, TraceEvent], Any] = {}
         self._overridden_builtins: list[str] = []
         user_ns = get_user_ns()
-        for macro_name, macro in (self.static_macros | self.dynamic_macros).items():
+        for macro_name, macro in (
+            self.static_macros | self.dynamic_macros | self.dynamic_method_macros
+        ).items():
             if hasattr(builtins, macro_name):
                 continue
             setattr(builtins, macro_name, macro)
@@ -208,17 +226,30 @@ class MacroTracer(pyc.BaseTracer):
         self._overridden_builtins.clear()
         super().reset()
 
-    class _IdentitySubscript:
+    class _IdentityAttributeSubscript:
         def __getitem__(self, item):
             return item
 
-    _identity_subscript = _IdentitySubscript()
+        def __getattr__(self, item):
+            return self
 
-    @pyc.before_subscript_load(when=is_dynamic_macro, reentrant=True)
+    _identity_attribute_subscript = _IdentityAttributeSubscript()
+
+    @pyc.before_attribute_load(when=is_dynamic_method_macro_attribute, reentrant=True)
+    def ignore_dynamic_macro_attribute_load(self, *_, **__):
+        return self._identity_attribute_subscript
+
+    @pyc.before_subscript_load(
+        when=lambda node: is_dynamic_macro(node) or is_dynamic_method_macro(node),
+        reentrant=True,
+    )
     def ignore_dynamic_macro_slice(self, *_, **__):
-        return self._identity_subscript
+        return self._identity_attribute_subscript
 
-    @pyc.before_subscript_slice(when=is_dynamic_macro, reentrant=True)
+    @pyc.before_subscript_slice(
+        when=lambda node: is_dynamic_macro(node) or is_dynamic_method_macro(node),
+        reentrant=True,
+    )
     def perform_dynamic_macro_substitution(
         self,
         _ret,
@@ -233,9 +264,19 @@ class MacroTracer(pyc.BaseTracer):
         if cached_lambda is not self._not_found:
             return cached_lambda
         __hide_pyccolo_frame__ = True
-        assert isinstance(node.value, ast.Name)
-        macro_instance = self.dynamic_macros[node.value.id]
-        expanded_macro_expr = macro_instance.expand(node.slice)
+        if isinstance(node.value, ast.Name):
+            macro_instance = self.dynamic_macros[node.value.id]
+            macro_body = node.slice
+        elif isinstance(node.value, ast.Attribute):
+            macro_instance = self.dynamic_method_macros[node.value.attr]
+            with fast.location_of(node.slice):
+                macro_body = fast.Tuple(elts=[node.value.value, node.slice])
+        else:
+            raise ValueError(
+                "Impossible node type for dynamic macro substitution: %s"
+                % type(node.value)
+            )
+        expanded_macro_expr = macro_instance.expand(macro_body)
         if isinstance(expanded_macro_expr, ast.expr):
             lambda_body = expanded_macro_expr
             orig_ctr = self.arg_replacer.arg_ctr
@@ -268,7 +309,7 @@ class MacroTracer(pyc.BaseTracer):
 
     @pyc.before_subscript_load(when=is_static_macro, reentrant=True)
     def load_macro_result(self, *_, **__):
-        return self._identity_subscript
+        return self._identity_attribute_subscript
 
     def _transform_ast_lambda_for_macro(
         self,
@@ -443,8 +484,8 @@ class MacroTracer(pyc.BaseTracer):
         __hide_pyccolo_frame__ = True
         func = cast(ast.Name, node.value).id
         callable_expr: ast.expr
-        if func == "macro":
-            macro = DynamicMacro.create(node.slice, self)
+        if func in ("macro", "method"):
+            macro = DynamicMacro.create(node.slice, self, is_method=func == "method")
             ret = lambda: __hide_pyccolo_frame__ and macro  # noqa: E731
             self.lambda_cache[lambda_cache_key] = ret
             return ret

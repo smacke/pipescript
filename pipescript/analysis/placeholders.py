@@ -146,6 +146,11 @@ class PlaceholderReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
         ):
             # defer visiting nested quick lambdas
             return
+        if (
+            isinstance(node.value, ast.Attribute)
+            and node.value.attr in MacroTracer.dynamic_method_macros
+        ):
+            return
         self.generic_visit(node)
 
     def visit_BinOp(self, node: ast.BinOp) -> None:

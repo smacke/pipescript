@@ -39,8 +39,13 @@ def identify_dynamic_macros(*_, **__) -> None:
         return
     user_ns = shell.user_ns
     MacroTracer.dynamic_macros.clear()
+    MacroTracer.dynamic_method_macros.clear()
     for k, v in user_ns.items():
-        if isinstance(v, DynamicMacro):
+        if not isinstance(v, DynamicMacro):
+            continue
+        if v.is_method:
+            MacroTracer.dynamic_method_macros[k] = v
+        else:
             MacroTracer.dynamic_macros[k] = v
 
 
