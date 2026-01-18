@@ -6,8 +6,7 @@ Just run `%load_ext pipescript` to begin using pipe operators, placeholders, and
 from __future__ import annotations
 
 import sys
-
-from IPython.core.interactiveshell import InteractiveShell
+from typing import TYPE_CHECKING
 
 import pipescript.api
 from pipescript.api import *  # noqa: F403
@@ -24,6 +23,9 @@ from pipescript.tracers.pipeline_tracer import PipelineTracer
 from . import _version  # noqa: E402
 
 __version__ = _version.get_versions()["version"]
+
+if TYPE_CHECKING:
+    from IPython.core.interactiveshell import InteractiveShell
 
 
 def load_ipython_extension_ipyflow(shell: InteractiveShell) -> None:

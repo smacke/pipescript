@@ -3,10 +3,9 @@ from __future__ import annotations
 import inspect
 import os
 from types import FrameType, TracebackType
-from typing import Any, Callable, cast
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 import pyccolo as pyc
-from IPython.core.interactiveshell import ExecutionInfo, InteractiveShell
 from pyccolo.emit_event import SANDBOX_FNAME_PREFIX
 from pyccolo.tracer import (
     HIDE_PYCCOLO_FRAME,
@@ -18,6 +17,9 @@ from pipescript.patches.completion_patch import patch_completer
 from pipescript.tracers.macro_tracer import DynamicMacro, MacroTracer
 from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
 from pipescript.tracers.pipeline_tracer import PipelineTracer
+
+if TYPE_CHECKING:
+    from IPython.core.interactiveshell import ExecutionInfo, InteractiveShell
 
 
 def clear_tracer_stacks(*_, **__) -> None:
