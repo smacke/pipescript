@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING
 
 import pipescript.api
 from pipescript.api import *  # noqa: F403
-from pipescript.extension import clear_tracer_stacks, identify_dynamic_macros
+from pipescript.extension import (
+    clear_tracer_stacks,
+    identify_dynamic_macros,
+    load_builtin_dynamic_macros,
+)
 from pipescript.extension import load_ipython_extension as load_ipython_extension_base
 from pipescript.extension import (
     unload_ipython_extension as unload_ipython_extension_base,
@@ -46,6 +50,7 @@ def load_ipython_extension_ipyflow(shell: InteractiveShell) -> None:
     shell.events.register("post_run_cell", clear_tracer_stacks)
     shell.events.register("post_run_cell", identify_dynamic_macros)
     patch_completer(shell.Completer)
+    load_builtin_dynamic_macros(shell)
 
 
 def unload_ipython_extension_ipyflow(shell: InteractiveShell) -> None:

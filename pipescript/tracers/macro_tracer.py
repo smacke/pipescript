@@ -199,6 +199,10 @@ class MacroTracer(pyc.BaseTracer):
 
     dynamic_method_macros: dict[str, DynamicMacro] = {}
 
+    builtin_dynamic_macro_definitions: dict[str, str] = {
+        "foreach": "method[$$ |> map[do[$$]] |> list]",
+    }
+
     assert set(pipescript.api.static_macros.__all__) <= set(static_macros.keys())
 
     _not_found = object()

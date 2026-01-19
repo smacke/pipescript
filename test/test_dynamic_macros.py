@@ -16,9 +16,15 @@ from pipescript.tracers.pipeline_tracer import PipelineTracer
 @pytest.fixture(autouse=True)
 def all_tracers() -> Generator[None, None, None]:
     MacroTracer.dynamic_macros.clear()
+    MacroTracer.dynamic_method_macros.clear()
     with PipelineTracer:
         with MacroTracer:
             with OptionalChainingTracer:
+                for (
+                    macro_name,
+                    macro_def,
+                ) in MacroTracer.builtin_dynamic_macro_definitions.items():
+                    refresh_dynamic_macros(pyc.exec(f"{macro_name} = {macro_def}"))
                 yield
 
 
@@ -152,3 +158,8 @@ def test_simple_method_macro():
         "range(10).foreach[$ |> lst.append($)]", global_env=env, local_env=env
     )
     assert pyc.eval("lst", global_env=env, local_env=env) == list(range(10)) * 4
+
+
+def test_builtin_foreach():
+    env = pyc.exec("lst = []; range(10).foreach[lst.append] |> null")
+    assert env["lst"] == list(range(10))
