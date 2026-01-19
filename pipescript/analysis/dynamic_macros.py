@@ -26,7 +26,7 @@ class DynamicMacroArgSubstitutor(ast.NodeTransformer):
         self.ordered_arg_names = ordered_arg_names
         self.arg_node_subst_exprs = arg_node_subst_exprs
         self.dynamic_macros = dynamic_macros
-        self.method_dynamic_macros = dynamic_macros
+        self.method_dynamic_macros = method_dynamic_macros
 
     def visit_Subscript(self, node: ast.Subscript) -> ast.AST:
         if not isinstance(node.value, ast.Name):
