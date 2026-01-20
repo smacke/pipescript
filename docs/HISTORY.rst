@@ -1,6 +1,10 @@
 History
 =======
 
+0.0.12 (2026-01-19)
+-------------------
+* Bump pyccolo to include fstring improvement;
+
 0.0.11 (2026-01-18)
 -------------------
 * Implement custom dynamic macros;

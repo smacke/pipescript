@@ -163,3 +163,5 @@ def test_simple_method_macro():
 def test_builtin_foreach():
     env = pyc.exec("lst = []; range(10).foreach[lst.append] |> null")
     assert env["lst"] == list(range(10))
+    env = pyc.exec("lst = []; range(10).foreach[lst.append(f'hello {$}')] |> null")
+    assert env["lst"] == [f"hello {i}" for i in range(10)]
