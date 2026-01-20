@@ -10,6 +10,26 @@ pipescript
 Pipescript is an IPython extension that brings a pipe operator `|>` and
 powerful placeholder and macro expansion syntax extensions to IPython and Jupyter.
 
+For a quick example, consider the following code snippet, which is not super easy
+to read (which function call does the keyword parameter `initial=1.0` go with?):
+
+```python
+result = max(
+    np.max(np.abs(array[np.isfinite(array)]), initial=1.0)
+    for array in arrays
+)
+```
+
+This mess of nested function calls can be written in pipescript as follows:
+
+```python
+result = arrays |> map[$
+  |> $array[np.isfinite($array)]
+  |> np.abs
+  |> np.max($, initial=1.0)
+] |> max
+```
+
 If you're familiar with the [magrittr](https://magrittr.tidyverse.org/) package
 for R, then you'll be right at home with pipescript.
 
