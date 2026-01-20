@@ -160,7 +160,8 @@ akin to the typical usage of `functools.partial`. For example:
 ```
 
 To avoid writing out a `$` placeholder for each and every tail argument, you can
-prefix the call itself with a `$` and omit subsequent arguments, just like in coconut:
+prefix the call itself with a `$` and omit subsequent arguments, just like in
+[coconut](https://coconut-lang.org/):
 
 ```python
 >>> add_reducer = reduce$(lambda x, y: x + y)
