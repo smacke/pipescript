@@ -54,7 +54,12 @@ def make_ipython_name(shell: InteractiveShell, info: ExecutionInfo) -> str:
     kwargs: dict[str, Any] = {}
     if "raw_code" in inspect.signature(cache).parameters:
         kwargs["raw_code"] = info.raw_cell
-    return cache(info.transformed_cell, shell.execution_count, **kwargs)
+    transformed_cell = getattr(info, "transformed_cell", None)
+    return cache(
+        transformed_cell or shell.transform_cell(info.raw_cell),
+        shell.execution_count,
+        **kwargs,
+    )
 
 
 def make_tracing_contexts(
