@@ -2,29 +2,27 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pyccolo as pyc
+
 if TYPE_CHECKING:
     from IPython.core.completer import Completer, Completion
 
 
-def patch_completer(completer: Completer) -> None:
+def patch_completer(completer: Completer, tracers: list[pyc.BaseTracer]) -> None:
     clazz: type[Completer] = completer.__class__
 
     class PatchedCompleter(clazz):  # type: ignore[misc, valid-type]
         def completions(self, text: str, offset: int) -> list[Completion]:
             before_offset = text[:offset]
-            placeholder_split = before_offset.rsplit("$.", 1)
-            if len(placeholder_split) == 2:
-                shift_amount = len(placeholder_split[0])
-                completions = super().completions(
-                    "_." + placeholder_split[1], offset - shift_amount
-                )
-                completions = list(completions)
-                for completion in completions:
-                    completion.start += shift_amount
-                    completion.end += shift_amount
-                return completions
-            else:
+            transformed = pyc.transform(before_offset, tracers=tracers)
+            if transformed == before_offset:
                 return super().completions(text, offset)
+            shift_amount = offset - len(transformed)
+            completions = list(super().completions(transformed, len(transformed)))
+            for completion in completions:
+                completion.start += shift_amount
+                completion.end += shift_amount
+            return completions
 
     completer.__class__ = PatchedCompleter
 

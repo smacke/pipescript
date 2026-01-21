@@ -1,6 +1,10 @@
 History
 =======
 
+0.0.15 (2026-01-20)
+-------------------
+* Improved completions integration;
+
 0.0.14 (2026-01-19)
 -------------------
 * Bump pyccolo to include fstring improvement;

@@ -6,7 +6,9 @@ Just run `%load_ext pipescript` to begin using pipe operators, placeholders, and
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
+
+import pyccolo as pyc
 
 import pipescript.api
 from pipescript.api import *  # noqa: F403
@@ -49,7 +51,11 @@ def load_ipython_extension_ipyflow(shell: InteractiveShell) -> None:
     )
     shell.events.register("post_run_cell", clear_tracer_stacks)
     shell.events.register("post_run_cell", identify_dynamic_macros)
-    patch_completer(shell.Completer)
+    tracers = [
+        cast(pyc.BaseTracer, cls).instance()
+        for cls in [PipelineTracer, MacroTracer, OptionalChainingTracer]
+    ]
+    patch_completer(shell.Completer, tracers=tracers)
     load_builtin_dynamic_macros(shell)
 
 

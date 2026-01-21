@@ -49,7 +49,10 @@ def identify_dynamic_macros(*_, **__) -> None:
             MacroTracer.dynamic_macros[k] = v
 
 
-def make_ipython_name(shell: InteractiveShell, info: ExecutionInfo) -> str:
+def make_ipython_name(
+    shell: InteractiveShell,
+    info: ExecutionInfo,
+) -> str:
     cache = shell.compile.cache
     kwargs: dict[str, Any] = {}
     if "raw_code" in inspect.signature(cache).parameters:
@@ -79,14 +82,14 @@ def make_tracing_contexts(
     shell.ast_transformers.append(rewriter)
 
     def _enter_tracer_context_callback(info: ExecutionInfo, *_, **__) -> None:
+        for tracer in tracers:
+            tracer.reset()
+            tracer.__enter__()
         cell_name = make_ipython_name(shell, info)
         rewriter._path = cell_name
         rewriter._module_id = shell.execution_count
         for tracer in tracers:
             tracer._tracing_enabled_files.add(cell_name)
-            tracer.reset()
-        for tracer in tracers:
-            tracer.__enter__()
 
     def _exit_tracer_context_callback(*_, **__) -> None:
         nonlocal inited
@@ -154,7 +157,7 @@ def load_ipython_extension(shell: InteractiveShell) -> None:
     shell.__class__.showtraceback = make_patched_showtraceback(  # type: ignore[method-assign]
         shell.__class__.showtraceback
     )
-    patch_completer(shell.Completer)
+    patch_completer(shell.Completer, tracers)
     load_builtin_dynamic_macros(shell)
 
 
