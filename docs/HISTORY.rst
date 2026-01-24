@@ -1,7 +1,7 @@
 History
 =======
 
-0.0.15 (2026-01-20)
+0.0.16 (2026-01-24)
 -------------------
 * Improved completions integration;
 

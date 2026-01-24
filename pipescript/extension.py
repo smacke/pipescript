@@ -157,7 +157,7 @@ def load_ipython_extension(shell: InteractiveShell) -> None:
     shell.__class__.showtraceback = make_patched_showtraceback(  # type: ignore[method-assign]
         shell.__class__.showtraceback
     )
-    patch_completer(shell.Completer, tracers)
+    patch_completer(shell, tracers)
     load_builtin_dynamic_macros(shell)
 
 
