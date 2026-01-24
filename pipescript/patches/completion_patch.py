@@ -11,6 +11,8 @@ if TYPE_CHECKING:
     from IPython.core.interactiveshell import InteractiveShell
 
 
+do_complete_patch_cls: type[IPythonKernel] = None  # type: ignore[assignment]
+get_completion_context_patch_cls: type[IPythonKernel] = None  # type: ignore[assignment]
 orig_do_complete = None
 orig_get_completion_context = None
 
@@ -18,13 +20,17 @@ orig_get_completion_context = None
 def patch_kernel_completer(
     kernel: IPythonKernel, tracers: list[pyc.BaseTracer]
 ) -> None:
+    global do_complete_patch_cls
+    global get_completion_context_patch_cls
     global orig_do_complete
     global orig_get_completion_context
-    from ipykernel.ipkernel import IPythonKernel
 
-    orig_do_complete = IPythonKernel.do_complete
+    for do_complete_patch_cls in kernel.__class__.mro():
+        if "do_complete" in do_complete_patch_cls.__dict__:
+            break
+    orig_do_complete = do_complete_patch_cls.do_complete
 
-    @functools.wraps(IPythonKernel.do_complete)
+    @functools.wraps(do_complete_patch_cls.do_complete)
     def patched_do_complete(self, code: str, cursor_pos: int) -> dict[str, Any]:
         before_offset = code[:cursor_pos]
         transformed = pyc.transform(before_offset, tracers=tracers)
@@ -34,43 +40,53 @@ def patch_kernel_completer(
         shift_amount = cursor_pos - len(transformed)
         completions["cursor_start"] += shift_amount
         completions["cursor_end"] += shift_amount
-        for exp in completions.get("metadata", {}).get(
+        for metadatum in completions.get("metadata", {}).get(
             "_jupyter_types_experimental", []
         ):
-            exp["start"] += shift_amount
-            exp["end"] += shift_amount
+            metadatum["start"] += shift_amount
+            metadatum["end"] += shift_amount
         return completions
 
-    IPythonKernel.do_complete = patched_do_complete  # type: ignore[method-assign]
+    do_complete_patch_cls.do_complete = patched_do_complete  # type: ignore[method-assign]
 
     # Databricks LSP support
-    if hasattr(kernel.__class__, "_get_completion_context"):
-        orig_get_completion_context = kernel.__class__._get_completion_context
+    if not hasattr(kernel.__class__, "_get_completion_context"):
+        return
+    for get_completion_context_patch_cls in kernel.__class__.mro():
+        if "_get_completion_context" in get_completion_context_patch_cls.__dict__:
+            break
+    orig_get_completion_context = (
+        get_completion_context_patch_cls._get_completion_context  # type: ignore[attr-defined]
+    )
 
-        @functools.wraps(kernel.__class__._get_completion_context)
-        def patched_get_completion_context(self, *args, **kwargs) -> str:
-            return pyc.transform(
-                orig_get_completion_context(self, *args, **kwargs), tracers=tracers
-            )
+    @functools.wraps(get_completion_context_patch_cls._get_completion_context)  # type: ignore[attr-defined]
+    def patched_get_completion_context(self, *args, **kwargs) -> str:
+        return pyc.transform(
+            orig_get_completion_context(self, *args, **kwargs), tracers=tracers
+        )
 
-        kernel.__class__._get_completion_context = patched_get_completion_context
+    get_completion_context_patch_cls._get_completion_context = (  # type: ignore[attr-defined]
+        patched_get_completion_context
+    )
 
 
-def unpatch_kernel_completer(kernel: IPythonKernel) -> None:
+def unpatch_kernel_completer() -> None:
+    global do_complete_patch_cls
+    global get_completion_context_patch_cls
     global orig_do_complete
     global orig_get_completion_context
-    assert orig_do_complete is not None
-    from ipykernel.ipkernel import IPythonKernel
 
-    IPythonKernel.do_complete = orig_do_complete  # type: ignore[method-assign]
+    assert do_complete_patch_cls is not None
+    assert orig_do_complete is not None
+    do_complete_patch_cls.do_complete = orig_do_complete  # type: ignore[method-assign]
+    do_complete_patch_cls = None  # type: ignore[assignment]
     orig_do_complete = None
 
-    if (
-        hasattr(kernel.__class__, "_get_completion_context")
-        and orig_get_completion_context is not None
-    ):
-        delattr(kernel.__class__, "_get_completion_context")
-        orig_get_completion_context = None
+    if get_completion_context_patch_cls is None:
+        return
+    assert orig_get_completion_context is not None
+    get_completion_context_patch_cls._get_completion_context = orig_get_completion_context  # type: ignore[attr-defined]
+    get_completion_context_patch_cls = None  # type: ignore[assignment]
 
 
 def patch_shell_completer(completer: Completer, tracers: list[pyc.BaseTracer]) -> None:
@@ -104,7 +120,7 @@ def patch_completer(shell: InteractiveShell, tracers: list[pyc.BaseTracer]) -> N
 
 
 def unpatch_completer(shell: InteractiveShell) -> None:
-    if (kernel := getattr(shell, "kernel", None)) is None:
+    if getattr(shell, "kernel", None) is None:
         unpatch_shell_completer(shell.Completer)
     else:
-        unpatch_kernel_completer(kernel)
+        unpatch_kernel_completer()
