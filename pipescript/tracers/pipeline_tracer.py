@@ -125,7 +125,6 @@ _skip_binop_args_lambda = lambda: None  # noqa: E731
 
 
 class PipelineTracer(pyc.BaseTracer):
-
     allow_reentrant_events = True
     global_guards_enabled = False
     multiple_threads_allowed = True
@@ -521,10 +520,12 @@ class PipelineTracer(pyc.BaseTracer):
         placeholder_names = self.placeholder_replacer.rewrite(
             lambda_body, allow_top_level=True, check_all_calls=False
         )
-        ast_lambda, _extra_defaults, modified_lambda_body = (
-            SingletonArgCounterMixin.create_placeholder_lambda(
-                placeholder_names, orig_ctr, lambda_body, frame
-            )
+        (
+            ast_lambda,
+            _extra_defaults,
+            modified_lambda_body,
+        ) = SingletonArgCounterMixin.create_placeholder_lambda(
+            placeholder_names, orig_ctr, lambda_body, frame
         )
         lambda_body = modified_lambda_body or lambda_body
         ast_lambda.body = lambda_body
@@ -622,17 +623,19 @@ class PipelineTracer(pyc.BaseTracer):
             if len(name) == 1 or not name[1].isdigit()
         ]
         if placeholder_names_to_associate:
-            self.placeholder_arg_position_cache[id(node_to_associate)] = (
-                placeholder_names_to_associate
-            )
+            self.placeholder_arg_position_cache[
+                id(node_to_associate)
+            ] = placeholder_names_to_associate
         if not associate_lhs:
             placeholder_names = self.reorder_placeholder_names_for_prior_positions(
                 parent.left, placeholder_names
             )
-        ast_lambda, _extra_defaults, modified_lambda_body = (
-            SingletonArgCounterMixin.create_placeholder_lambda(
-                placeholder_names, orig_ctr, full_node or node, frame
-            )
+        (
+            ast_lambda,
+            _extra_defaults,
+            modified_lambda_body,
+        ) = SingletonArgCounterMixin.create_placeholder_lambda(
+            placeholder_names, orig_ctr, full_node or node, frame
         )
         return ast_lambda, modified_lambda_body
 

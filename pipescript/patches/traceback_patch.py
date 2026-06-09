@@ -14,9 +14,9 @@ except ImportError:
     orig_find_node_ipython_cloned = None  # type: ignore[assignment]
 
 
-frame_to_node_mapping: weakref.WeakValueDictionary[tuple[str, int], ast.AST] = (
-    weakref.WeakValueDictionary()
-)
+frame_to_node_mapping: weakref.WeakValueDictionary[
+    tuple[str, int], ast.AST
+] = weakref.WeakValueDictionary()
 
 
 def find_node_ipython(frame, last_i, stmts, source):
@@ -33,7 +33,7 @@ def patch_find_node_ipython():
     if orig_find_node_ipython is None or orig_find_node_ipython_cloned is None:
         return
     orig_find_node_ipython.__code__ = find_node_ipython.__code__
-    orig_find_node_ipython.__globals__["orig_find_node_ipython_cloned"] = (
-        orig_find_node_ipython_cloned
-    )
+    orig_find_node_ipython.__globals__[
+        "orig_find_node_ipython_cloned"
+    ] = orig_find_node_ipython_cloned
     orig_find_node_ipython.__globals__["frame_to_node_mapping"] = frame_to_node_mapping

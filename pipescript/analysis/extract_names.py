@@ -51,9 +51,9 @@ class ExtractNames(ast.NodeVisitor):
                 after_names.discard(name)
         self.names = after_names
 
-    visit_GeneratorExp = visit_DictComp = visit_ListComp = visit_SetComp = (
-        generic_visit_comprehension
-    )
+    visit_GeneratorExp = (
+        visit_DictComp
+    ) = visit_ListComp = visit_SetComp = generic_visit_comprehension
 
     @classmethod
     def extract_names(cls, node: ast.expr) -> set[str]:
