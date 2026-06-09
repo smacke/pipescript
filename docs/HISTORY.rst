@@ -1,6 +1,10 @@
 History
 =======
 
+0.0.19 (2026-06-08)
+-------------------
+* Compatibility with ipyflow;
+
 0.0.18 (2026-01-24)
 -------------------
 * Improved completions integration;
