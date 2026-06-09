@@ -137,9 +137,17 @@ def make_patched_showtraceback(orig_showtraceback):
     return patched_showtraceback
 
 
-def load_builtin_dynamic_macros(shell: InteractiveShell) -> None:
+def load_builtin_dynamic_macros(
+    shell: InteractiveShell,
+    run_cell: Callable[[str], object] | None = None,
+) -> None:
+    if run_cell is None:
+
+        def run_cell(code: str) -> object:
+            return shell.run_cell(code, store_history=False, silent=False)
+
     for macro_name, macro_def in MacroTracer.builtin_dynamic_macro_definitions.items():
-        shell.run_cell(f"{macro_name} = {macro_def}", store_history=False, silent=False)
+        run_cell(f"{macro_name} = {macro_def}")
 
 
 def load_ipython_extension(shell: InteractiveShell) -> None:

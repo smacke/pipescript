@@ -6,7 +6,7 @@ Just run `%load_ext pipescript` to begin using pipe operators, placeholders, and
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Callable, cast
 
 import pyccolo as pyc
 
@@ -34,7 +34,10 @@ if TYPE_CHECKING:
     from IPython.core.interactiveshell import InteractiveShell
 
 
-def load_ipython_extension_ipyflow(shell: InteractiveShell) -> None:
+def load_ipython_extension_ipyflow(
+    shell: InteractiveShell,
+    run_cell: Callable[[str], object] | None = None,
+) -> None:
     from ipyflow.shell.interactiveshell import IPyflowInteractiveShell
 
     assert isinstance(shell, IPyflowInteractiveShell)
@@ -55,8 +58,13 @@ def load_ipython_extension_ipyflow(shell: InteractiveShell) -> None:
         cast(pyc.BaseTracer, cls).instance()
         for cls in [PipelineTracer, MacroTracer, OptionalChainingTracer]
     ]
-    patch_completer(shell.Completer, tracers=tracers)
-    load_builtin_dynamic_macros(shell)
+    patch_completer(shell, tracers=tracers)
+
+    def _load_builtin_dynamic_macros_once(*_args, **_kwargs) -> None:
+        shell.events.unregister("post_run_cell", _load_builtin_dynamic_macros_once)
+        load_builtin_dynamic_macros(shell, run_cell=run_cell)
+
+    shell.events.register("post_run_cell", _load_builtin_dynamic_macros_once)
 
 
 def unload_ipython_extension_ipyflow(shell: InteractiveShell) -> None:
