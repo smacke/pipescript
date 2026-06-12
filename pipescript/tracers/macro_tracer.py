@@ -226,7 +226,11 @@ def split_block_placeholders(src: str) -> tuple[str, list[str]]:
     import keyword as _kw
     import tokenize as _tok
 
-    macro_names = set(MacroTracer.static_macros) | set(MacroTracer.dynamic_macros)
+    macro_names = (
+        set(MacroTracer.static_macros)
+        | set(MacroTracer.dynamic_macros)
+        | set(MacroTracer.dynamic_method_macros)
+    )
     try:
         toks = list(_tok.generate_tokens(io.StringIO(src).readline))
     except (_tok.TokenError, IndentationError, SyntaxError):

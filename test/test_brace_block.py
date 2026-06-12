@@ -188,3 +188,22 @@ def test_nested_statement_block_inside_block():
 
 def test_nested_statement_block_direct_call():
     assert pyc.eval("5 |> f{ z = f{ a = $ + 1\n a }(10)\n z * $ }") == 55
+
+
+def test_fork_tuple_body_via_braces():
+    # a tuple body is the fork/parallel multi-function template -> expression path
+    assert pyc.eval("5 |> fork{ $ + 1, $ * 2 }") == (6, 10)
+
+
+def test_nested_method_macro_scopes_inner_placeholder():
+    # the inner foreach's $ binds to the inner element, not the outer block's
+    ns = pyc.exec(
+        "seen = []\n"
+        "outer = [(0, [10, 20]), (1, [30])]\n"
+        "outer.foreach{\n"
+        "    i, items = $\n"
+        "    items.foreach{ seen.append(($, i)) }\n"
+        "}\n"
+        "result = seen"
+    )
+    assert ns["result"] == [(10, 0), (20, 0), (30, 1)], ns["result"]

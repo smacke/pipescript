@@ -47,27 +47,32 @@ class BraceBlockTracer(pyc.BaseTracer):
         )
 
     @staticmethod
-    def _is_expression(inner: str) -> bool:
+    def _is_tuple_expression(inner: str) -> bool:
         from pipescript.tracers.pipeline_tracer import PipelineTracer
 
-        # apply the pipeline/placeholder augmentations so that $, |>, etc. become
-        # valid Python, then ask whether the body parses as a single expression.
+        # A top-level tuple body is the multi-function template form consumed by
+        # `fork`/`parallel` (e.g. `fork{ f1, f2 }`), which genuinely needs the
+        # expression/template path. Everything else -- single expressions
+        # included -- goes through the block path so braces uniformly use the
+        # block's collapse-`$` semantics (and get their own scope, rather than
+        # the quick-lambda placeholder logic which mis-scopes when nested).
         check = PipelineTracer.instance().preprocess(inner, None)
         try:
-            ast.parse(check.strip(), mode="eval")
-            return True
+            tree = ast.parse(check.strip(), mode="eval")
         except SyntaxError:
             return False
+        return isinstance(tree.body, ast.Tuple)
 
     def _emit(self, name: str, inner: str) -> str:
-        if self._is_expression(inner):
-            # expression bodies are just a brace-for-bracket swap; the normal
-            # machinery (incl. the `$` placeholder pass) takes it from here.
+        if self._is_tuple_expression(inner):
+            # fork/parallel multi-function template: brace-for-bracket swap and
+            # let the normal expression machinery handle it.
             return f"{name}[{inner}]"
-        # statement body: stash it and leave a marker. The marker flows through
-        # macro expansion (e.g. a dynamic method macro like `foreach` expands to
-        # `... |> map[do[<marker>]] |> ...`) and is turned into a function by
-        # MacroTracer when the (static) macro that consumes it is expanded.
+        # Everything else (single expressions and statement bodies) is stashed
+        # and replaced with a marker. The marker flows through macro expansion
+        # (e.g. `foreach` expands to `... |> map[do[<marker>]] |> ...`) and is
+        # compiled into a function -- with collapse-`$` semantics and its own
+        # scope -- by MacroTracer when the consuming macro is expanded.
         BraceBlockTracer._counter += 1
         n = BraceBlockTracer._counter
         BraceBlockTracer.block_sources[n] = inner
