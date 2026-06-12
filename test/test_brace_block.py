@@ -181,7 +181,10 @@ def test_multiline_pipeline_chain_inside_block():
     )
 
 
-# NOTE: a nested *statement* block inside a statement block (e.g.
-# `f{ ... ($ |> f{ a = $ + 1\n a }) ... }`) is a known remaining limitation --
-# the inner block's marker leaks when compiled inside the outer block's
-# already-instrumented body.
+def test_nested_statement_block_inside_block():
+    # a statement block nested inside another statement block
+    assert pyc.eval("5 |> f{ y = ($ |> f{ a = $ + 1\n a })\n y * 10 }") == 60
+
+
+def test_nested_statement_block_direct_call():
+    assert pyc.eval("5 |> f{ z = f{ a = $ + 1\n a }(10)\n z * $ }") == 55

@@ -185,6 +185,34 @@ class _BlockPlaceholderReplacer(ast.NodeVisitor):
                 self.named.append(pname)
 
 
+def normalize_block_src(src: str) -> str:
+    """Normalize a captured block body to consistent indentation.
+
+    The body's first statement is typically *inline* with the opening ``{`` (so
+    it carries the column of the ``{``), while later statements carry the source
+    indentation -- which an enclosing block's dedent may have shifted relative to
+    the first line. ``textwrap.dedent`` can't fix that (the minimum indent may be
+    on a later line). Instead we dedent every line by the *first* line's indent,
+    clamping at zero, which puts the first statement at column 0 and preserves
+    the relative indentation of nested suites beneath it."""
+    lines = src.split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines:
+        return ""
+    base = len(lines[0]) - len(lines[0].lstrip())
+    out = []
+    for ln in lines:
+        if not ln.strip():
+            out.append("")
+            continue
+        indent = len(ln) - len(ln.lstrip())
+        out.append(" " * max(0, indent - base) + ln.lstrip())
+    return "\n".join(out)
+
+
 def split_block_placeholders(src: str) -> tuple[str, list[str]]:
     """Replace the *block's own* ``$`` placeholders with parameter names while
     leaving placeholders that belong to nested macros (``macro[...]`` /
@@ -653,34 +681,39 @@ class MacroTracer(pyc.BaseTracer):
         from pipescript.analysis.placeholders import FreeVarTransformer
         from pipescript.api.utils import _dynamic_lookup
 
-        block_src = textwrap.dedent(block_src).strip("\n")
+        block_src = normalize_block_src(block_src)
         # Substitute the block's own placeholders for parameters, leaving nested
         # macros' placeholders (still `$`) for pyccolo to mark/instrument.
         param_src, params = split_block_placeholders(block_src)
+        param_src = normalize_block_src(param_src)
         # Free-var analysis on a clean (uninstrumented) parse of the same source.
         clean_body = ast.parse(textwrap.dedent(self.transform(param_src)).strip("\n"))
         freevars = self._block_free_vars(clean_body.body, set(params), frame)
 
-        sig = ", ".join(list(params) + ["*__pyc_rest__"])
-        def_src = "def __pyc_macro_block__({}):\n{}".format(
-            sig, textwrap.indent(param_src, "    ")
-        )
-        module = cast(ast.Module, self.parse_fragment(def_src))
-        fn_def = next(
-            stmt
-            for stmt in module.body
-            if isinstance(stmt, ast.FunctionDef) and stmt.name == "__pyc_macro_block__"
-        )
-        # instrumentation wraps the body in a try/except; the trailing
+        # Parse the body as a *module* (at column 0) and wrap it in a FunctionDef
+        # at the AST level. Wrapping in `def ...:` *textually* (with
+        # textwrap.indent) corrupts a nested block whose first statement is inline
+        # with `{` -- its lines end up inconsistently indented and fail to parse.
+        body_module = cast(ast.Module, self.parse_fragment(param_src))
+        body = list(body_module.body)
+        # instrumentation may wrap the body in a try/except; the trailing
         # expression we want to return lives at the innermost level.
-        target_body = fn_def.body
+        target_body = body
         while len(target_body) == 1 and isinstance(target_body[0], ast.Try):
             target_body = target_body[0].body
         if target_body and isinstance(target_body[-1], ast.Expr):
             target_body[-1] = ast.Return(value=target_body[-1].value)
         if freevars:
             transformer = FreeVarTransformer(freevars, frame)
-            fn_def.body = [transformer.visit(stmt) for stmt in fn_def.body]
+            body = [transformer.visit(stmt) for stmt in body]
+
+        fn_def = cast(
+            ast.FunctionDef,
+            ast.parse("def __pyc_macro_block__(*__pyc_rest__):\n    pass").body[0],
+        )
+        fn_def.args.args = [ast.arg(arg=p) for p in params]
+        fn_def.body = body or [ast.Pass()]
+        module = ast.Module(body=[fn_def], type_ignores=[])
         ast.fix_missing_locations(module)
 
         block_globals = dict(frame.f_globals)
