@@ -42,11 +42,6 @@ def load_ipython_extension_ipyflow(
     from ipyflow.shell.interactiveshell import IPyflowInteractiveShell
 
     assert isinstance(shell, IPyflowInteractiveShell)
-    # BraceBlockTracer must be registered first (outermost) so `macro{ ... }`
-    # brace extraction runs before the `$` -> `_` placeholder pass.
-    shell.run_line_magic(
-        "flow", f"register {BraceBlockTracer.__module__}.{BraceBlockTracer.__name__}"
-    )
     shell.run_line_magic(
         "flow", f"register {PipelineTracer.__module__}.{PipelineTracer.__name__}"
     )
@@ -57,6 +52,12 @@ def load_ipython_extension_ipyflow(
     shell.run_line_magic(
         "flow",
         f"register {OptionalChainingTracer.__module__}.{OptionalChainingTracer.__name__}",
+    )
+    # Register BraceBlockTracer LAST: ipyflow applies syntax augmenters in
+    # reverse registration order, so this makes brace extraction run *first*
+    # (outermost) -- before the `$` -> `_` placeholder pass.
+    shell.run_line_magic(
+        "flow", f"register {BraceBlockTracer.__module__}.{BraceBlockTracer.__name__}"
     )
     shell.events.register("post_run_cell", clear_tracer_stacks)
     shell.events.register("post_run_cell", identify_dynamic_macros)
