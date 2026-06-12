@@ -15,6 +15,7 @@ from pyccolo.tracer import (
 )
 
 from pipescript.patches.completion_patch import patch_completer
+from pipescript.tracers.brace_block_tracer import BraceBlockTracer
 from pipescript.tracers.macro_tracer import DynamicMacro, MacroTracer
 from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
 from pipescript.tracers.pipeline_tracer import PipelineTracer
@@ -153,7 +154,14 @@ def load_builtin_dynamic_macros(
 def load_ipython_extension(shell: InteractiveShell) -> None:
     tracers = [
         cast(pyc.BaseTracer, cls).instance()
-        for cls in [PipelineTracer, MacroTracer, OptionalChainingTracer]
+        # BraceBlockTracer must be outermost so `macro{ ... }` brace extraction
+        # runs before the `$` -> `_` placeholder pass.
+        for cls in [
+            BraceBlockTracer,
+            PipelineTracer,
+            MacroTracer,
+            OptionalChainingTracer,
+        ]
     ]
     enter_context, exit_context = make_tracing_contexts(shell, tracers)
     shell.events.register("pre_run_cell", enter_context)

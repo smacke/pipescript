@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+import textwrap
 from contextlib import contextmanager
 from functools import reduce
 from types import FrameType
@@ -126,6 +127,62 @@ class ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
     def get_placeholder_names(self, node: ast.AST) -> list[str]:
         self(node)
         return self.placeholder_names
+
+
+_BLOCK_MARKER_PREFIX = "__pyc_block_"
+
+
+def block_marker_id(node: ast.AST) -> int | None:
+    """If ``node`` is a statement-block macro slice (``macro[__pyc_block_N__]``),
+    return ``N``; otherwise ``None``."""
+    if (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.slice, ast.Name)
+        and node.slice.id.startswith(_BLOCK_MARKER_PREFIX)
+        and node.slice.id.endswith("__")
+    ):
+        return int(node.slice.id[len(_BLOCK_MARKER_PREFIX) : -2])
+    return None
+
+
+class _BlockPlaceholderReplacer(ast.NodeVisitor):
+    """Identify ``$`` placeholders in a (already ``$``->``_`` transformed)
+    statement block by name convention and rename them to concrete parameter
+    names, mirroring :class:`ArgReplacer` but for statement bodies whose nodes
+    were not position-marked.
+
+    Unlike the expression form -- where each bare ``$`` is a *fresh* positional
+    argument -- a statement block treats every bare ``$`` as the single piped
+    input (parameter ``_0``), so it can be referenced repeatedly. Use named
+    placeholders (``$name``) for additional distinct parameters."""
+
+    def __init__(self) -> None:
+        self.auto: list[str] = []
+        self.named: list[str] = []
+
+    @property
+    def params(self) -> list[str]:
+        return self.auto + self.named
+
+    def visit_Subscript(self, node: ast.Subscript) -> None:
+        # defer nested macros -- their placeholders belong to them
+        if isinstance(node.value, ast.Name) and node.value.id in (
+            MacroTracer.static_macros | MacroTracer.dynamic_macros
+        ):
+            return
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        name = node.id
+        if name == "_":
+            node.id = "_0"
+            if "_0" not in self.auto:
+                self.auto.append("_0")
+        elif len(name) > 1 and name[0] == "_" and name[1].isalpha():
+            pname = name[1:]
+            node.id = pname
+            if pname not in self.named:
+                self.named.append(pname)
 
 
 def is_static_macro(node: ast.AST) -> bool:
@@ -479,6 +536,90 @@ class MacroTracer(pyc.BaseTracer):
         cast(ast.Call, expr).args[0] = fast.Constant(value=callpoint_id)
         return expr
 
+    def _compile_block_function(self, block_src: str, frame: FrameType):
+        """Compile a stashed statement block into a function: ``$`` placeholders
+        become parameters, the trailing expression becomes the return value, and
+        free variables are resolved against the defining frame (so the block can
+        run nested inside other macros and still see the enclosing scope)."""
+        from pipescript.analysis.placeholders import FreeVarTransformer
+        from pipescript.api.utils import _dynamic_lookup
+
+        src = self.transform(block_src)
+        src = textwrap.dedent(src).strip("\n")
+        body = list(ast.parse(src).body)
+        if body and isinstance(body[-1], ast.Expr):
+            body[-1] = ast.Return(value=body[-1].value)
+        replacer = _BlockPlaceholderReplacer()
+        for stmt in body:
+            replacer.visit(stmt)
+        params = replacer.params
+
+        # Names read but never assigned in the block (and not builtins/params)
+        # are free variables; resolve them by walking the defining frame's
+        # f_back chain, exactly as pipescript does for its lambdas.
+        loads: set[str] = set()
+        stores: set[str] = set()
+
+        class _NameCollector(ast.NodeVisitor):
+            def visit_Name(self, n: ast.Name) -> None:
+                (stores if isinstance(n.ctx, ast.Store) else loads).add(n.id)
+
+        collector = _NameCollector()
+        for stmt in body:
+            collector.visit(stmt)
+        freevars = {
+            n
+            for n in loads - stores - set(params)
+            if not hasattr(builtins, n) and not n.startswith("__pyc_")
+            # names already visible as globals/builtins resolve directly;
+            # `_dynamic_lookup` only walks enclosing *locals*.
+            and n not in frame.f_globals
+        }
+        if freevars:
+            transformer = FreeVarTransformer(freevars, frame)
+            body = [transformer.visit(stmt) for stmt in body]
+
+        fn_def = cast(
+            ast.FunctionDef,
+            ast.parse("def __pyc_macro_block__(*__pyc_rest__):\n    pass").body[0],
+        )
+        fn_def.args.args = [ast.arg(arg=p) for p in params]
+        fn_def.body = body or [ast.Pass()]
+        module = ast.Module(body=[fn_def], type_ignores=[])
+        ast.fix_missing_locations(module)
+        # Build with a plain compile/exec rather than self.exec: this runs
+        # *inside* an active macro expansion, and re-entering the tracer here
+        # would corrupt the outer expansion. Free variables are resolved via
+        # `_dynamic_lookup` (inserted above), so we don't need instrumentation.
+        block_globals = dict(frame.f_globals)
+        block_globals.setdefault("_dynamic_lookup", _dynamic_lookup)
+        local_ns: dict = {}
+        exec(compile(module, "<pyc-block>", "exec"), block_globals, local_ns)
+        return local_ns["__pyc_macro_block__"]
+
+    def _handle_block_macro(
+        self, node: ast.Subscript, frame: FrameType, func: str, block_id: int
+    ) -> ast.expr:
+        from pipescript.tracers.brace_block_tracer import BraceBlockTracer
+
+        block_fn = self._compile_block_function(
+            BraceBlockTracer.block_sources[block_id], frame
+        )
+        # expose the compiled function so the macro wrapper can reference it
+        gname = f"__pyc_block_fn_{id(block_fn)}__"
+        frame.f_globals[gname] = block_fn
+        with fast.location_of(node):
+            ast_lambda: ast.expr = fast.Name(gname, ctx=ast.Load())
+            if func in self.static_macros and func not in (
+                "f",
+                memoize.__name__,
+                otherwise.__name__,
+            ):
+                ast_lambda = self._transform_ast_lambda_for_macro(
+                    ast_lambda, func, set()
+                )
+        return ast_lambda
+
     @pyc.before_subscript_slice(when=is_static_macro, reentrant=True)
     def handle_macro(
         self, _ret, node: ast.Subscript, frame: FrameType, evt: TraceEvent, *_, **__
@@ -489,6 +630,13 @@ class MacroTracer(pyc.BaseTracer):
             return cached_lambda
         __hide_pyccolo_frame__ = True
         func = cast(ast.Name, node.value).id
+        block_id = block_marker_id(node)
+        if block_id is not None:
+            callable_expr = self._handle_block_macro(node, frame, func, block_id)
+            evaluated_lambda = pyc.eval(callable_expr, frame.f_globals, frame.f_locals)
+            ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731
+            self.lambda_cache[lambda_cache_key] = ret
+            return ret
         callable_expr: ast.expr
         if func in ("macro", "method"):
             macro = DynamicMacro.create(node.slice, self, is_method=func == "method")

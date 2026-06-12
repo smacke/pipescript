@@ -75,6 +75,9 @@ class SingletonArgCounterMixin:
                 if arg not in frame.f_globals
                 and arg not in frame.f_locals
                 and not hasattr(builtins, arg)
+                # statement-block markers are resolved by MacroTracer when the
+                # consuming subscript macro is expanded, not by name lookup.
+                and not arg.startswith("__pyc_block_")
             }
             if len(freevars) > 0:
                 modified_lambda_body = FreeVarTransformer(freevars, frame).visit(

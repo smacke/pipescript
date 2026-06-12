@@ -22,6 +22,7 @@ from pipescript.extension import (
     unload_ipython_extension as unload_ipython_extension_base,
 )
 from pipescript.patches.completion_patch import patch_completer, unpatch_completer
+from pipescript.tracers.brace_block_tracer import BraceBlockTracer
 from pipescript.tracers.macro_tracer import MacroTracer
 from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
 from pipescript.tracers.pipeline_tracer import PipelineTracer
@@ -41,6 +42,11 @@ def load_ipython_extension_ipyflow(
     from ipyflow.shell.interactiveshell import IPyflowInteractiveShell
 
     assert isinstance(shell, IPyflowInteractiveShell)
+    # BraceBlockTracer must be registered first (outermost) so `macro{ ... }`
+    # brace extraction runs before the `$` -> `_` placeholder pass.
+    shell.run_line_magic(
+        "flow", f"register {BraceBlockTracer.__module__}.{BraceBlockTracer.__name__}"
+    )
     shell.run_line_magic(
         "flow", f"register {PipelineTracer.__module__}.{PipelineTracer.__name__}"
     )
@@ -56,7 +62,12 @@ def load_ipython_extension_ipyflow(
     shell.events.register("post_run_cell", identify_dynamic_macros)
     tracers = [
         cast(pyc.BaseTracer, cls).instance()
-        for cls in [PipelineTracer, MacroTracer, OptionalChainingTracer]
+        for cls in [
+            BraceBlockTracer,
+            PipelineTracer,
+            MacroTracer,
+            OptionalChainingTracer,
+        ]
     ]
     patch_completer(shell, tracers=tracers)
 
