@@ -151,3 +151,37 @@ def test_method_macro_block_mutates_enclosing_scope():
         cur[idx] += offs[d]
         houses.add((idx, cur[idx]))
     assert ns["result"] == sorted(houses)
+
+
+# --- nested pipescript syntax inside a statement block ---
+
+
+def test_pipeline_inside_block():
+    assert pyc.eval("5 |> f{ y = ($ |> f[$ + 1])\n y * 10 }") == 60
+
+
+def test_bracket_macro_inside_block():
+    assert pyc.eval("5 |> f{ y = ($ |> when[$ > 0])\n y }") == 5
+
+
+def test_nested_expression_block_inside_block():
+    assert pyc.eval("5 |> f{ y = ($ |> f{ $ + 1 })\n y * 10 }") == 60
+
+
+def test_multiline_pipeline_chain_inside_block():
+    assert (
+        pyc.eval(
+            "10 |> f{\n"
+            "    half = ($ |> f[$ // 2])\n"
+            "    bumped = (half |> f[$ + 1])\n"
+            "    bumped * 100\n"
+            "}"
+        )
+        == 600
+    )
+
+
+# NOTE: a nested *statement* block inside a statement block (e.g.
+# `f{ ... ($ |> f{ a = $ + 1\n a }) ... }`) is a known remaining limitation --
+# the inner block's marker leaks when compiled inside the outer block's
+# already-instrumented body.

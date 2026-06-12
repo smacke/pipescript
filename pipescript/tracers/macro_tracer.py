@@ -185,6 +185,84 @@ class _BlockPlaceholderReplacer(ast.NodeVisitor):
                 self.named.append(pname)
 
 
+def split_block_placeholders(src: str) -> tuple[str, list[str]]:
+    """Replace the *block's own* ``$`` placeholders with parameter names while
+    leaving placeholders that belong to nested macros (``macro[...]`` /
+    ``macro{...}``) untouched, so they are processed by those macros later.
+
+    Returns ``(new_src, params)``. Bare ``$`` collapses to the single piped
+    input ``_0``; ``$name`` becomes a distinct parameter ``name``. A ``$`` is
+    "nested" when it sits inside a ``[``/``{`` that immediately follows a macro
+    name."""
+    import io
+    import keyword as _kw
+    import tokenize as _tok
+
+    macro_names = set(MacroTracer.static_macros) | set(MacroTracer.dynamic_macros)
+    try:
+        toks = list(_tok.generate_tokens(io.StringIO(src).readline))
+    except (_tok.TokenError, IndentationError, SyntaxError):
+        return src, []
+
+    line_starts = [0]
+    for i, ch in enumerate(src):
+        if ch == "\n":
+            line_starts.append(i + 1)
+
+    def _off(pos: tuple[int, int]) -> int:
+        return line_starts[pos[0] - 1] + pos[1]
+
+    repls: list[tuple[int, int, str]] = []
+    auto: list[str] = []
+    named: list[str] = []
+    macro_depth = 0
+    opener_is_macro: list[bool] = []
+    prev = None
+    for i, t in enumerate(toks):
+        if t.type in (
+            _tok.NL,
+            _tok.NEWLINE,
+            _tok.INDENT,
+            _tok.DEDENT,
+            _tok.COMMENT,
+            _tok.ENCODING,
+        ):
+            continue
+        if t.type == _tok.OP and t.string in ("[", "{"):
+            is_macro = (
+                prev is not None
+                and prev.type == _tok.NAME
+                and prev.string in macro_names
+                and prev.end == t.start
+            )
+            opener_is_macro.append(is_macro)
+            macro_depth += int(is_macro)
+        elif t.type == _tok.OP and t.string in ("]", "}"):
+            if opener_is_macro:
+                macro_depth -= int(opener_is_macro.pop())
+        elif t.string == "$" and macro_depth == 0:
+            nxt = toks[i + 1] if i + 1 < len(toks) else None
+            if (
+                nxt is not None
+                and nxt.type == _tok.NAME
+                and not _kw.iskeyword(nxt.string)
+                and t.end == nxt.start
+            ):
+                pname = nxt.string
+                repls.append((_off(t.start), _off(nxt.end), pname))
+                if pname not in named:
+                    named.append(pname)
+            else:
+                repls.append((_off(t.start), _off(t.end), "_0"))
+                if "_0" not in auto:
+                    auto.append("_0")
+        prev = t
+
+    for start, end, text in sorted(repls, reverse=True):
+        src = src[:start] + text + src[end:]
+    return src, auto + named
+
+
 def is_static_macro(node: ast.AST) -> bool:
     return (
         isinstance(node, ast.Subscript)
@@ -536,27 +614,13 @@ class MacroTracer(pyc.BaseTracer):
         cast(ast.Call, expr).args[0] = fast.Constant(value=callpoint_id)
         return expr
 
-    def _compile_block_function(self, block_src: str, frame: FrameType):
-        """Compile a stashed statement block into a function: ``$`` placeholders
-        become parameters, the trailing expression becomes the return value, and
-        free variables are resolved against the defining frame (so the block can
-        run nested inside other macros and still see the enclosing scope)."""
-        from pipescript.analysis.placeholders import FreeVarTransformer
-        from pipescript.api.utils import _dynamic_lookup
-
-        src = self.transform(block_src)
-        src = textwrap.dedent(src).strip("\n")
-        body = list(ast.parse(src).body)
-        if body and isinstance(body[-1], ast.Expr):
-            body[-1] = ast.Return(value=body[-1].value)
-        replacer = _BlockPlaceholderReplacer()
-        for stmt in body:
-            replacer.visit(stmt)
-        params = replacer.params
-
-        # Names read but never assigned in the block (and not builtins/params)
-        # are free variables; resolve them by walking the defining frame's
-        # f_back chain, exactly as pipescript does for its lambdas.
+    def _block_free_vars(
+        self, body: list[ast.stmt], params: set[str], frame: FrameType
+    ) -> set[str]:
+        """Names the block reads but never assigns (and that aren't params,
+        builtins, or globals); resolved against the defining frame's f_back
+        chain. Computed from the placeholder-substituted source before
+        instrumentation so pyccolo's own instrumentation names don't leak in."""
         loads: set[str] = set()
         stores: set[str] = set()
 
@@ -567,34 +631,70 @@ class MacroTracer(pyc.BaseTracer):
         collector = _NameCollector()
         for stmt in body:
             collector.visit(stmt)
-        freevars = {
+        return {
             n
-            for n in loads - stores - set(params)
+            for n in loads - stores - params
             if not hasattr(builtins, n) and not n.startswith("__pyc_")
             # names already visible as globals/builtins resolve directly;
             # `_dynamic_lookup` only walks enclosing *locals*.
             and n not in frame.f_globals
         }
+
+    def _compile_block_function(self, block_src: str, frame: FrameType):
+        """Compile a stashed statement block into a function: the block's own
+        ``$`` placeholders become parameters, the trailing expression becomes the
+        return value, free variables resolve against the defining frame, and
+        *nested* pipescript syntax (``|>``, ``f[...]``, ``f{...}``) is parsed,
+        marked, and instrumented so it dispatches at runtime.
+
+        The body is compiled via :meth:`~pyccolo.BaseTracer.parse_fragment`,
+        which instruments the fragment from inside this active macro expansion
+        without re-entering / corrupting it."""
+        from pipescript.analysis.placeholders import FreeVarTransformer
+        from pipescript.api.utils import _dynamic_lookup
+
+        block_src = textwrap.dedent(block_src).strip("\n")
+        # Substitute the block's own placeholders for parameters, leaving nested
+        # macros' placeholders (still `$`) for pyccolo to mark/instrument.
+        param_src, params = split_block_placeholders(block_src)
+        # Free-var analysis on a clean (uninstrumented) parse of the same source.
+        clean_body = ast.parse(textwrap.dedent(self.transform(param_src)).strip("\n"))
+        freevars = self._block_free_vars(clean_body.body, set(params), frame)
+
+        sig = ", ".join(list(params) + ["*__pyc_rest__"])
+        def_src = "def __pyc_macro_block__({}):\n{}".format(
+            sig, textwrap.indent(param_src, "    ")
+        )
+        module = cast(ast.Module, self.parse_fragment(def_src))
+        fn_def = next(
+            stmt
+            for stmt in module.body
+            if isinstance(stmt, ast.FunctionDef) and stmt.name == "__pyc_macro_block__"
+        )
+        # instrumentation wraps the body in a try/except; the trailing
+        # expression we want to return lives at the innermost level.
+        target_body = fn_def.body
+        while len(target_body) == 1 and isinstance(target_body[0], ast.Try):
+            target_body = target_body[0].body
+        if target_body and isinstance(target_body[-1], ast.Expr):
+            target_body[-1] = ast.Return(value=target_body[-1].value)
         if freevars:
             transformer = FreeVarTransformer(freevars, frame)
-            body = [transformer.visit(stmt) for stmt in body]
-
-        fn_def = cast(
-            ast.FunctionDef,
-            ast.parse("def __pyc_macro_block__(*__pyc_rest__):\n    pass").body[0],
-        )
-        fn_def.args.args = [ast.arg(arg=p) for p in params]
-        fn_def.body = body or [ast.Pass()]
-        module = ast.Module(body=[fn_def], type_ignores=[])
+            fn_def.body = [transformer.visit(stmt) for stmt in fn_def.body]
         ast.fix_missing_locations(module)
-        # Build with a plain compile/exec rather than self.exec: this runs
-        # *inside* an active macro expansion, and re-entering the tracer here
-        # would corrupt the outer expansion. Free variables are resolved via
-        # `_dynamic_lookup` (inserted above), so we don't need instrumentation.
+
         block_globals = dict(frame.f_globals)
         block_globals.setdefault("_dynamic_lookup", _dynamic_lookup)
         local_ns: dict = {}
-        exec(compile(module, "<pyc-block>", "exec"), block_globals, local_ns)
+        # exec_raw with instrument=False reuses the active trace (no reset) so
+        # the already-instrumented nested macros still fire.
+        self.exec_raw(
+            module,
+            global_env=block_globals,
+            local_env=local_ns,
+            filename=self.make_sandbox_fname(),
+            instrument=False,
+        )
         return local_ns["__pyc_macro_block__"]
 
     def _handle_block_macro(
