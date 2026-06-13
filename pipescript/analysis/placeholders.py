@@ -153,6 +153,13 @@ class PlaceholderReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
             isinstance(node.value, ast.Attribute)
             and node.value.attr in MacroTracer.dynamic_method_macros
         ):
+            # The macro's slice is its own scope (defer it), but the *receiver*
+            # is part of the enclosing expression -- e.g. `$.foreach[...]` used
+            # as a pipe stage (`xs |> $.foreach[...]`), where `$` is the piped
+            # value. Visit the receiver so its placeholder gets wrapped into the
+            # stage lambda; otherwise the receiver `$` evaluates as an unbound
+            # name at runtime before the macro handler can fire.
+            self.visit(node.value.value)
             return
         self.generic_visit(node)
 

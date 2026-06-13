@@ -248,6 +248,48 @@ def test_nested_method_macro_scopes_inner_placeholder():
     assert ns["result"] == [(10, 0), (20, 0), (30, 1)], ns["result"]
 
 
+def test_method_macro_as_pipe_stage_with_placeholder_receiver():
+    # `$.foreach[...]` as a pipe stage: the `$` receiver is the piped value and
+    # must be bound by the stage lambda. Previously it evaluated as an unbound
+    # name before the macro could fire ("name '_' is not defined").
+    ns = pyc.exec(
+        "out = []\n"
+        "range(4) |> $.foreach[out.append($ ** 2)]\n"
+        "result = out"
+    )
+    assert ns["result"] == [0, 1, 4, 9], ns["result"]
+
+
+def test_method_macro_brace_block_as_pipe_stage_with_placeholder_receiver():
+    # the brace-block form of the above, with tuple-unpacking in the body
+    ns = pyc.exec(
+        "positions = {}\n"
+        "[('a', 1), ('b', 2), ('a', 3)] |> enumerate |> $.foreach{\n"
+        "    i, kv = $\n"
+        "    positions.setdefault(kv[0], []).append((i, kv[1]))\n"
+        "}\n"
+        "result = positions"
+    )
+    assert ns["result"] == {"a": [(0, 1), (2, 3)], "b": [(1, 2)]}, ns["result"]
+
+
+def test_method_macro_pipe_stage_nested_in_block():
+    # the user-reported case: a `... |> $.foreach{...}` pipeline nested inside an
+    # enclosing `map{...}` block, whose own placeholder is distinct.
+    ns = pyc.exec(
+        "out = [['ab', 'cd'], ['ef']]\n"
+        "result = out |> map{\n"
+        "    counts = {}\n"
+        "    $ |> enumerate |> $.foreach{\n"
+        "        i, s = $\n"
+        "        counts[i] = len(s)\n"
+        "    }\n"
+        "    counts\n"
+        "} |> list"
+    )
+    assert ns["result"] == [{0: 2, 1: 2}, {0: 2}], ns["result"]
+
+
 def test_block_marker_emission_is_idempotent():
     # A host like ipyflow runs the syntax augmenter several times per cell; the
     # same block must always get the same marker id, or the rewriter's
