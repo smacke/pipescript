@@ -865,13 +865,13 @@ class MacroTracer(pyc.BaseTracer):
         __hide_pyccolo_frame__ = True
         func = cast(ast.Name, node.value).id
         block_id = block_marker_id(node)
+        callable_expr: ast.expr
         if block_id is not None:
             callable_expr = self._handle_block_macro(node, frame, func, block_id)
             evaluated_lambda = pyc.eval(callable_expr, frame.f_globals, frame.f_locals)
             ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731
             self.lambda_cache[lambda_cache_key] = ret
             return ret
-        callable_expr: ast.expr
         if func in ("macro", "method"):
             macro = DynamicMacro.create(node.slice, self, is_method=func == "method")
             ret = lambda: __hide_pyccolo_frame__ and macro  # noqa: E731
