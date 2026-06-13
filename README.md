@@ -606,7 +606,8 @@ fill some of Python's pipe and functional programming gaps with elegant APIs.
 ## Disclaimer
 
 **Warning: use pipescript at your own risk!** It is very much not guaranteed to
-be bug-free -- I implemented it in a hurry before it was time to go back to work.
+be bug-free -- I implemented it in a hurry during the 2025 holiday season
+before it was time to go back to work.
 
 ## License
 Code in this project licensed under the [BSD-3-Clause License](https://opensource.org/licenses/BSD-3-Clause).
