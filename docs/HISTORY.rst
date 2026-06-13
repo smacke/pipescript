@@ -1,6 +1,14 @@
 History
 =======
 
+0.0.20 (2026-06-12)
+-------------------
+* Add brace syntax for macros, including multi-line statement blocks;
+* Support nested pipescript syntax inside statement blocks;
+* Use block semantics for non-tuple brace bodies and fix nested method-macro scope;
+* Make brace blocks robust under ipyflow and re-execution;
+* Bump pyccolo requirement;
+
 0.0.19 (2026-06-08)
 -------------------
 * Compatibility with ipyflow;
