@@ -96,6 +96,41 @@ class TemplateDynamicMacro(DynamicMacro):
         self.template = template
         self.ordered_arg_names = ordered_arg_names
         self.tracer = tracer
+        # Durable snapshot of the template's augmentation marks (placeholders,
+        # pipe operators, nested-macro markers). Latch now, while we are still in
+        # the defining cell's expansion and the marks are fresh -- a macro may
+        # not be *expanded* until many cells later, by which point process-wide
+        # mark churn (``reset_bookkeeping``) could have wiped them. See
+        # `_sync_template_marks`.
+        self._template_marks: list[tuple[ast.AST, Any]] | None = None
+        self._sync_template_marks()
+
+    def _sync_template_marks(self) -> None:
+        """Keep the template's augmentation marks alive across expansions.
+
+        ``expand`` (and the re-parse of what it produces) relies on pyccolo's
+        process-wide ``augmented_node_ids_by_spec`` still marking the template's
+        nodes -- its ``$$`` placeholders, its ``|>`` pipe operators, its nested
+        ``map[...]``/``do[...]`` macro markers, etc. But that mapping is global
+        and gets wiped wholesale by ``reset_bookkeeping`` (e.g. between cells in
+        a test harness) -- after which a macro defined in an earlier cell expands
+        with no marks and silently mis-expands. We hold the template node objects
+        (valid as long as the template lives) together with the specs that marked
+        them, latched the first time the marks are present, and re-establish them
+        before every expansion."""
+        import pyccolo as pyc
+
+        by_spec = pyc.BaseTracer.augmented_node_ids_by_spec
+        if self._template_marks is None:
+            captured: list[tuple[ast.AST, Any]] = []
+            for node in ast.walk(self.template):
+                for spec in pyc.BaseTracer.get_augmentations(id(node)):
+                    captured.append((node, spec))
+            if captured:
+                self._template_marks = captured
+        if self._template_marks:
+            for node, spec in self._template_marks:
+                by_spec[spec].add(id(node))
 
     @property
     def arg_replacer(self) -> ArgReplacer:
@@ -110,6 +145,7 @@ class TemplateDynamicMacro(DynamicMacro):
         return self.tracer.dynamic_method_macros
 
     def expand(self, args: ast.expr) -> ast.expr:
+        self._sync_template_marks()
         template_copy: ast.expr = StatementMapper.bookkeeping_propagating_copy(
             self.template
         )

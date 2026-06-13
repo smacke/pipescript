@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+import re
 import textwrap
 from contextlib import contextmanager
 from functools import reduce
@@ -129,19 +130,48 @@ class ArgReplacer(ast.NodeVisitor, SingletonArgCounterMixin):
         return self.placeholder_names
 
 
-_BLOCK_MARKER_PREFIX = "__pyc_block_"
+#: Name of the sentinel builtin a statement-block marker calls (see
+#: :func:`block_marker_id` / :func:`_block_marker_sentinel`).
+BLOCK_MARKER_FUNC = "__pyc_block__"
+
+
+def _block_marker_sentinel(_n: int) -> None:
+    """Resolve a statement-block marker (``__pyc_block__(N)``) to ``None``.
+
+    The marker is emitted as a call to this *defined* builtin rather than a bare
+    (undefined) ``__pyc_block_N__`` name. ipyflow's ``before_subscript_slice``
+    machinery evaluates the original slice expression *before* the macro handler
+    can substitute it, so an undefined marker name leaks as a ``NameError``
+    before ``handle_macro`` ever runs. Calling a defined sentinel evaluates
+    harmlessly to ``None``; the handler (which keys off the AST, not the value)
+    then fires and replaces the slice with the compiled block, exactly as it
+    does for an ordinary ``map[int]``-style slice. (Base pyccolo substitutes
+    lazily and never evaluated the marker, which is why this only bit ipyflow.)
+    """
+    return None
+
+
+# Register the sentinel as a builtin so the marker call resolves anywhere the
+# slice is evaluated (cell globals, compiled-block globals) and survives the
+# per-cell tracer ``reset()`` that strips macro-name builtins.
+setattr(builtins, BLOCK_MARKER_FUNC, _block_marker_sentinel)
 
 
 def block_marker_id(node: ast.AST) -> int | None:
-    """If ``node`` is a statement-block macro slice (``macro[__pyc_block_N__]``),
+    """If ``node`` is a statement-block macro slice (``macro[__pyc_block__(N)]``),
     return ``N``; otherwise ``None``."""
+    if not isinstance(node, ast.Subscript):
+        return None
+    slc = node.slice
     if (
-        isinstance(node, ast.Subscript)
-        and isinstance(node.slice, ast.Name)
-        and node.slice.id.startswith(_BLOCK_MARKER_PREFIX)
-        and node.slice.id.endswith("__")
+        isinstance(slc, ast.Call)
+        and isinstance(slc.func, ast.Name)
+        and slc.func.id == BLOCK_MARKER_FUNC
+        and len(slc.args) == 1
+        and isinstance(slc.args[0], ast.Constant)
+        and isinstance(slc.args[0].value, int)
     ):
-        return int(node.slice.id[len(_BLOCK_MARKER_PREFIX) : -2])
+        return slc.args[0].value
     return None
 
 
@@ -213,15 +243,35 @@ def normalize_block_src(src: str) -> str:
     return "\n".join(out)
 
 
+# Forward-pipe operators (``|>`` and friends, with optional ``*`` / ``**``
+# unpack prefixes). Their right-hand *stage* expression has its own ``$``
+# placeholders (the piped value), which belong to PipelineTracer -- not to the
+# block's collapse-``$`` semantics. Matched longest-first so e.g. ``**|>`` wins
+# over ``|>``.
+_FORWARD_PIPE_RE = re.compile(r"(?:\*\*|\*)?(?:\|>>|\|>|\$>|\?>|\.>)")
+
+# Tokens that end a pipe stage, so a ``$`` after them is the block's again. We
+# scope conservatively: commas, comparisons (lower precedence than ``|``), the
+# ternary/boolean keywords, and assignment/colon. (The ``<``/``>`` that form
+# pipe operators are consumed as pipe spans below, so a bare ``<``/``>`` here is
+# a real comparison.)
+_STAGE_TERMINATOR_OPS = frozenset(
+    {",", "==", "!=", "<", ">", "<=", ">=", "=", ":", ";"}
+)
+_STAGE_TERMINATOR_KW = frozenset({"and", "or", "not", "in", "is", "if", "else", "for"})
+
+
 def split_block_placeholders(src: str) -> tuple[str, list[str]]:
     """Replace the *block's own* ``$`` placeholders with parameter names while
     leaving placeholders that belong to nested macros (``macro[...]`` /
-    ``macro{...}``) untouched, so they are processed by those macros later.
+    ``macro{...}``) or to nested *pipelines* (the stage after ``|>``) untouched,
+    so they are processed by those handlers later.
 
     Returns ``(new_src, params)``. Bare ``$`` collapses to the single piped
     input ``_0``; ``$name`` becomes a distinct parameter ``name``. A ``$`` is
     "nested" when it sits inside a ``[``/``{`` that immediately follows a macro
-    name."""
+    name, or in a forward-pipe stage at the current bracket depth (e.g. the
+    second ``$`` in ``$ |> $ + 1`` is the pipe's argument, not the block's)."""
     import io
     import keyword as _kw
     import tokenize as _tok
@@ -242,13 +292,24 @@ def split_block_placeholders(src: str) -> tuple[str, list[str]]:
             line_starts.append(i + 1)
 
     def _off(pos: tuple[int, int]) -> int:
-        return line_starts[pos[0] - 1] + pos[1]
+        row = pos[0] - 1
+        if row >= len(line_starts):
+            return len(src)
+        return line_starts[row] + pos[1]
+
+    pipe_spans = [m.span() for m in _FORWARD_PIPE_RE.finditer(src)]
+
+    def _in_pipe_span(start: int, end: int) -> bool:
+        return any(s < end and start < e for s, e in pipe_spans)
 
     repls: list[tuple[int, int, str]] = []
     auto: list[str] = []
     named: list[str] = []
     macro_depth = 0
     opener_is_macro: list[bool] = []
+    # one "pipe stage seen" flag per open-bracket depth (index 0 == top level),
+    # so a pipe inside ``(...)`` doesn't leak out to siblings.
+    pipe_seen: list[bool] = [False]
     prev = None
     for i, t in enumerate(toks):
         if t.type in (
@@ -258,21 +319,38 @@ def split_block_placeholders(src: str) -> tuple[str, list[str]]:
             _tok.DEDENT,
             _tok.COMMENT,
             _tok.ENCODING,
+            _tok.ENDMARKER,
         ):
+            if t.type in (_tok.NL, _tok.NEWLINE):
+                pipe_seen[-1] = False
             continue
-        if t.type == _tok.OP and t.string in ("[", "{"):
-            is_macro = (
-                prev is not None
-                and prev.type == _tok.NAME
-                and prev.string in macro_names
-                and prev.end == t.start
-            )
-            opener_is_macro.append(is_macro)
-            macro_depth += int(is_macro)
-        elif t.type == _tok.OP and t.string in ("]", "}"):
-            if opener_is_macro:
+        start, end = _off(t.start), _off(t.end)
+        if _in_pipe_span(start, end):
+            # part of a forward-pipe operator: opens a stage at this depth
+            pipe_seen[-1] = True
+            prev = t
+            continue
+        if t.type == _tok.OP and t.string in ("(", "[", "{"):
+            if t.string in ("[", "{"):
+                is_macro = (
+                    prev is not None
+                    and prev.type == _tok.NAME
+                    and prev.string in macro_names
+                    and prev.end == t.start
+                )
+                opener_is_macro.append(is_macro)
+                macro_depth += int(is_macro)
+            pipe_seen.append(False)
+        elif t.type == _tok.OP and t.string in (")", "]", "}"):
+            if t.string in ("]", "}") and opener_is_macro:
                 macro_depth -= int(opener_is_macro.pop())
-        elif t.string == "$" and macro_depth == 0:
+            if len(pipe_seen) > 1:
+                pipe_seen.pop()
+        elif (t.type == _tok.OP and t.string in _STAGE_TERMINATOR_OPS) or (
+            t.type == _tok.NAME and t.string in _STAGE_TERMINATOR_KW
+        ):
+            pipe_seen[-1] = False
+        elif t.string == "$" and macro_depth == 0 and not pipe_seen[-1]:
             nxt = toks[i + 1] if i + 1 < len(toks) else None
             if (
                 nxt is not None
@@ -281,17 +359,17 @@ def split_block_placeholders(src: str) -> tuple[str, list[str]]:
                 and t.end == nxt.start
             ):
                 pname = nxt.string
-                repls.append((_off(t.start), _off(nxt.end), pname))
+                repls.append((start, _off(nxt.end), pname))
                 if pname not in named:
                     named.append(pname)
             else:
-                repls.append((_off(t.start), _off(t.end), "_0"))
+                repls.append((start, end, "_0"))
                 if "_0" not in auto:
                     auto.append("_0")
         prev = t
 
-    for start, end, text in sorted(repls, reverse=True):
-        src = src[:start] + text + src[end:]
+    for rstart, rend, text in sorted(repls, reverse=True):
+        src = src[:rstart] + text + src[rend:]
     return src, auto + named
 
 
@@ -682,6 +760,10 @@ class MacroTracer(pyc.BaseTracer):
         The body is compiled via :meth:`~pyccolo.BaseTracer.parse_fragment`,
         which instruments the fragment from inside this active macro expansion
         without re-entering / corrupting it."""
+        # Hidden so a co-tracer (e.g. ipyflow) that walks the frame stack to map
+        # a sandbox call back to a notebook position skips this frame instead of
+        # misattributing its own line number to the executing cell.
+        __hide_pyccolo_frame__ = True  # noqa: F841
         from pipescript.analysis.placeholders import FreeVarTransformer
         from pipescript.api.utils import _dynamic_lookup
 
@@ -698,7 +780,21 @@ class MacroTracer(pyc.BaseTracer):
         # at the AST level. Wrapping in `def ...:` *textually* (with
         # textwrap.indent) corrupts a nested block whose first statement is inline
         # with `{` -- its lines end up inconsistently indented and fail to parse.
-        body_module = cast(ast.Module, self.parse_fragment(param_src))
+        #
+        # Scope the instrumentation to the substituting tracers (those with
+        # ``global_guards_enabled = False`` -- i.e. pipescript's own, which the
+        # block's nested macros need), excluding pure observers like ipyflow's
+        # dataflow tracer. The block is synthetic sandbox code an observer cannot
+        # map back to a notebook statement; weaving its statement events in makes
+        # the observer raise on the block's unknown nodes.
+        from pyccolo.tracer import _TRACER_STACK
+
+        block_tracers = [
+            t for t in _TRACER_STACK if not t.global_guards_enabled
+        ] or None
+        body_module = cast(
+            ast.Module, self.parse_fragment(param_src, tracers=block_tracers)
+        )
         body = list(body_module.body)
         # instrumentation may wrap the body in a try/except; the trailing
         # expression we want to return lives at the innermost level.
@@ -737,6 +833,7 @@ class MacroTracer(pyc.BaseTracer):
     def _handle_block_macro(
         self, node: ast.Subscript, frame: FrameType, func: str, block_id: int
     ) -> ast.expr:
+        __hide_pyccolo_frame__ = True  # noqa: F841
         from pipescript.tracers.brace_block_tracer import BraceBlockTracer
 
         block_fn = self._compile_block_function(

@@ -34,6 +34,13 @@ class BraceBlockTracer(pyc.BaseTracer):
 
     # raw statement-body source keyed by marker id; read by MacroTracer
     block_sources: dict[int, str] = {}
+    # reverse map (source -> id) so a given block always gets the *same* marker:
+    # ipyflow invokes the syntax augmenter several times per cell (liveness,
+    # analysis, execution), and a fresh id each pass would make the augmenter
+    # non-idempotent -- the rewriter's instrumentation, set up against one pass's
+    # output, then fails to line up with the marker the executed pass emits, and
+    # the cell silently runs uninstrumented.
+    _id_by_source: dict[str, int] = {}
     _counter = 0
 
     @staticmethod
@@ -73,10 +80,20 @@ class BraceBlockTracer(pyc.BaseTracer):
         # (e.g. `foreach` expands to `... |> map[do[<marker>]] |> ...`) and is
         # compiled into a function -- with collapse-`$` semantics and its own
         # scope -- by MacroTracer when the consuming macro is expanded.
-        BraceBlockTracer._counter += 1
-        n = BraceBlockTracer._counter
-        BraceBlockTracer.block_sources[n] = inner
-        return f"{name}[__pyc_block_{n}__]"
+        n = BraceBlockTracer._id_by_source.get(inner)
+        if n is None:
+            BraceBlockTracer._counter += 1
+            n = BraceBlockTracer._counter
+            BraceBlockTracer._id_by_source[inner] = n
+            BraceBlockTracer.block_sources[n] = inner
+        # Emit the marker as a call to the defined sentinel `__pyc_block__(N)`
+        # rather than a bare (undefined) name: under ipyflow the slice expression
+        # is evaluated before the macro handler can substitute it, so an
+        # undefined marker name would leak as a `NameError`. See
+        # `macro_tracer.block_marker_id` / `_block_marker_sentinel`.
+        from pipescript.tracers.macro_tracer import BLOCK_MARKER_FUNC
+
+        return f"{name}[{BLOCK_MARKER_FUNC}({n})]"
 
     def _augment(self, code: str) -> str:
         names = self._macro_names()

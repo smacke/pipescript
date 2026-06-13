@@ -13,6 +13,10 @@ C = TypeVar("C", bound=Callable[..., Any])
 
 # Like functoolz `do`
 def do(func: Callable[[T, *tuple[T]], Any], obj: T, *extra: T) -> T | tuple[T, ...]:
+    # Hidden so a co-tracer (e.g. ipyflow) walking the stack from the user
+    # placeholder-lambda this calls skips this frame rather than mapping its
+    # static_macros line number onto the executing cell. See `repeat` below.
+    __hide_pyccolo_frame__ = True  # noqa: F841
     func(obj, *extra)
     return obj if len(extra) == 0 else (obj, *extra)
 
@@ -21,6 +25,7 @@ def do(func: Callable[[T, *tuple[T]], Any], obj: T, *extra: T) -> T | tuple[T, .
 def fork(
     funcs: tuple[Callable[[T, *tuple[T]], Any]], obj: T, *extra: T
 ) -> tuple[Any, ...]:
+    __hide_pyccolo_frame__ = True  # noqa: F841
     if isinstance(funcs[0], bool):
         # TODO: kinda hacky; is there a more robust way to signal the presence of an `otherwise` macro?
         return _fork_with_otherwise(funcs[1:], obj, *extra)
@@ -45,6 +50,7 @@ def parallel(
 
 
 def when(func: Callable[[T, *tuple[T]], bool], obj: T, *extra: T) -> T | tuple[T, ...]:
+    __hide_pyccolo_frame__ = True  # noqa: F841
     if func(obj, *extra):
         return obj if len(extra) == 0 else (obj, *extra)
     else:
@@ -58,6 +64,7 @@ def otherwise(func: C) -> C:
 def _fork_with_otherwise(
     funcs: tuple[Callable[[T, *tuple[T]], Any]], obj: T, *extra: T
 ) -> tuple[Any, ...]:
+    __hide_pyccolo_frame__ = True  # noqa: F841
     results: list[Any] = []
     func: Callable[[T, *tuple[T]], Any]
     for func in funcs[:-1]:
@@ -89,11 +96,21 @@ def _parallel_with_otherwise(
 def unless(
     func: Callable[[T, *tuple[T]], bool], obj: T, *extra: T
 ) -> T | tuple[T, ...]:
-    return when(lambda o, *e: not func(o, *e), obj, *extra)
+    __hide_pyccolo_frame__ = True  # noqa: F841
+
+    # a nested ``def`` (not a lambda) so the negating wrapper frame can also carry
+    # the hide marker -- otherwise a co-tracer stops at it and maps this file's
+    # line onto the cell.
+    def _negate(o: T, *e: T) -> bool:
+        __hide_pyccolo_frame__ = True  # noqa: F841
+        return not func(o, *e)
+
+    return when(_negate, obj, *extra)
 
 
 # `until` just an alias of `unless`
 def until(func: Callable[[T, *tuple[T]], bool], obj: T, *extra: T) -> T | tuple[T, ...]:
+    __hide_pyccolo_frame__ = True  # noqa: F841
     return unless(func, obj, *extra)
 
 
@@ -140,6 +157,7 @@ def ntimes(obj: T, callpoint_id: int) -> T:
 
 
 def context(func, obj):
+    __hide_pyccolo_frame__ = True  # noqa: F841
     with obj as o:
         return func(obj if o is None else o)
 
@@ -147,6 +165,7 @@ def context(func, obj):
 def expect(
     func: Callable[[T, *tuple[T]], bool], obj: T, *extra: T
 ) -> T | tuple[T, ...]:
+    __hide_pyccolo_frame__ = True  # noqa: F841
     assert func(obj, *extra)
     return obj if len(extra) == 0 else (obj, *extra)
 
