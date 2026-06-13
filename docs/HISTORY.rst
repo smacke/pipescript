@@ -1,6 +1,10 @@
 History
 =======
 
+0.0.21 (2026-06-13)
+-------------------
+* Bind the ``$`` receiver of method macros used as pipe stages (e.g. ``xs |> $.foreach{ ... }``);
+
 0.0.20 (2026-06-12)
 -------------------
 * Add brace syntax for macros, including multi-line statement blocks;
