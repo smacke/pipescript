@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import ast
 import builtins
+import copy
 import functools
+import linecache
 from types import FrameType
 from typing import Any, Callable, Sequence, cast
 
@@ -124,10 +126,93 @@ def partial_call_currier(func: Callable[..., Any]) -> Callable[..., Any]:
 _skip_binop_args_lambda = lambda: None  # noqa: E731
 
 
+class _PlaceholderToDollar(ast.NodeTransformer):
+    def __init__(self, names: set[str]) -> None:
+        self._names = names
+
+    def visit_Name(self, node: ast.Name) -> ast.AST:
+        if node.id in self._names:
+            return ast.copy_location(ast.Name(id="$", ctx=node.ctx), node)
+        return node
+
+
+def _resugar_pipe_lambda(lam: ast.AST) -> str | None:
+    """Reconstruct ``$ |> stage |> ...`` surface syntax from a synthesized pipe
+    lambda (for source retrieval). A pipe lambda is ``lambda _N, <captures>: _N |
+    stage | stage | ...`` once ``|>`` is lowered to ``|`` and ``$`` to ``_N`` /
+    ``_``. Returns None for shapes it does not recognize, so callers can fall back
+    to the desugared unparse."""
+    if not isinstance(lam, ast.Lambda) or not hasattr(ast, "unparse"):
+        return None
+    args = lam.args
+    n_placeholders = len(args.args) - len(args.defaults)
+    if n_placeholders < 1:
+        return None
+    placeholder_names = {a.arg for a in args.args[:n_placeholders]} | {"_"}
+    chain: list[ast.expr] = []
+    node: ast.expr = lam.body
+    while isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        chain.append(node.right)
+        node = node.left
+    chain.append(node)
+    chain.reverse()
+    if not (isinstance(chain[0], ast.Name) and chain[0].id in placeholder_names):
+        return None
+
+    def render(expr: ast.expr) -> str:
+        sub = _PlaceholderToDollar(placeholder_names).visit(copy.deepcopy(expr))
+        return ast.unparse(ast.fix_missing_locations(sub))
+
+    return " |> ".join(["$"] + [render(stage) for stage in chain[1:]])
+
+
 class PipelineTracer(pyc.BaseTracer):
     allow_reentrant_events = True
     global_guards_enabled = False
     multiple_threads_allowed = True
+
+    def _pipe_source(self, lam: ast.AST) -> str | None:
+        # Re-sugar a pipe lambda *before* pyc.eval weaves emit calls into it. Only
+        # when source retrieval is enabled (it unparses on every pipe otherwise).
+        # ``getattr`` so we degrade gracefully on a pyccolo without the flag.
+        if not getattr(self, "keep_sandbox_source", False):
+            return None
+        try:
+            return _resugar_pipe_lambda(lam)
+        except Exception:
+            return None
+
+    def _register_pipe_source(self, fn: object, source: str | None) -> None:
+        # Replace pyccolo's desugared sandbox source (cached during pyc.eval) with
+        # the reconstructed ``$ |> ...`` form, so inspect.getsource / tracebacks
+        # show the pipe the user actually wrote.
+        code = getattr(fn, "__code__", None)
+        if source is None or code is None:
+            return
+        linecache.cache[code.co_filename] = (
+            len(source),
+            None,
+            [source + "\n"],
+            code.co_filename,
+        )
+
+    # Hooks that may rewrite an applied function based on the value flowing into
+    # it -- each is ``(func, value) -> func`` and they are applied in order before
+    # the call. They fire for every operator that applies a function to a piped
+    # value: the pipes (``|>``, ``*|>``, ``**|>`` and their null variants), the
+    # apply ops (``<|`` etc.), and the value-/function-first partial-apply ops --
+    # not just ``|>``. The application happens inside this tracer's handler (not at
+    # an instrumented call site), so a co-active ``before_call`` tracer cannot see
+    # it; these hooks are the supported way to participate. For example, an
+    # autodiff tracer can swap ``np.exp`` for a differentiable version when the
+    # value flowing in carries a gradient tape.
+    application_hooks: list[Callable[[Any, Any], Any]] = []
+
+    def _resolve_piped(self, func: Any, value: Any) -> Any:
+        """Run ``func`` through the application hooks for the given piped value."""
+        for hook in type(self).application_hooks:
+            func = hook(func, value)
+        return func
 
     add_op_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.dot_prefix, token="[+]", replacement="f[$ + $]"
@@ -665,7 +750,9 @@ class PipelineTracer(pyc.BaseTracer):
         )
         transformed = modified_lambda_body or transformed
         ast_lambda.body = transformed
+        pipe_source = self._pipe_source(ast_lambda)
         evaluated_lambda = pyc.eval(ast_lambda, frame.f_globals, frame.f_locals)
+        self._register_pipe_source(evaluated_lambda, pipe_source)
         return lambda: __hide_pyccolo_frame__ and evaluated_lambda
 
     @classmethod
@@ -746,7 +833,9 @@ class PipelineTracer(pyc.BaseTracer):
         )
         transformed = modified_lambda_body or transformed
         ast_lambda.body = transformed
+        pipe_source = self._pipe_source(ast_lambda)
         evaluated_lambda = pyc.eval(ast_lambda, frame.f_globals, frame.f_locals)
+        self._register_pipe_source(evaluated_lambda, pipe_source)
         return lambda *_, **__: __hide_pyccolo_frame__ and evaluated_lambda
 
     @pyc.register_handler(
@@ -765,19 +854,21 @@ class PipelineTracer(pyc.BaseTracer):
         this_node_augmentations = self.get_augmentations(id(node))
         if self.pipeline_op_spec in this_node_augmentations:
             return lambda x, y: (
-                __hide_pyccolo_frame__ and pipeline_null if x is pipeline_null else y(x)
+                __hide_pyccolo_frame__ and pipeline_null
+                if x is pipeline_null
+                else self._resolve_piped(y, x)(x)
             )
         elif self.pipeline_tuple_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if x is pipeline_null
-                else y(*x)
+                else self._resolve_piped(y, x)(*x)
             )
         elif self.pipeline_dict_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if x is pipeline_null
-                else y(**x)
+                else self._resolve_piped(y, x)(**x)
             )
         elif self.pipeline_op_assign_spec in this_node_augmentations:
             rhs: ast.Name = node.right  # type: ignore
@@ -801,19 +892,19 @@ class PipelineTracer(pyc.BaseTracer):
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if x in (None, pipeline_null)
-                else y(x)
+                else self._resolve_piped(y, x)(x)
             )
         elif self.nullpipe_tuple_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if x in (None, pipeline_null)
-                else y(*x)
+                else self._resolve_piped(y, x)(*x)
             )
         elif self.nullpipe_dict_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if x in (None, pipeline_null)
-                else y(**x)
+                else self._resolve_piped(y, x)(**x)
             )
         elif self.value_first_left_partial_apply_op_spec in this_node_augmentations:
             return lambda x, y: (
@@ -821,7 +912,7 @@ class PipelineTracer(pyc.BaseTracer):
                 if x is pipeline_null
                 else (
                     lambda *args, **kwargs: __hide_pyccolo_frame__
-                    and y(x, *args, **kwargs)
+                    and self._resolve_piped(y, x)(x, *args, **kwargs)
                 )
             )
         elif (
@@ -832,7 +923,7 @@ class PipelineTracer(pyc.BaseTracer):
                 if x is pipeline_null
                 else (
                     lambda *args, **kwargs: __hide_pyccolo_frame__
-                    and y(*x, *args, **kwargs)
+                    and self._resolve_piped(y, x)(*x, *args, **kwargs)
                 )
             )
         elif (
@@ -843,7 +934,7 @@ class PipelineTracer(pyc.BaseTracer):
                 if x is pipeline_null
                 else (
                     lambda *args, **kwargs: __hide_pyccolo_frame__
-                    and y(*args, **x, **kwargs)
+                    and self._resolve_piped(y, x)(*args, **x, **kwargs)
                 )
             )
         elif self.function_first_left_partial_apply_op_spec in this_node_augmentations:
@@ -852,7 +943,8 @@ class PipelineTracer(pyc.BaseTracer):
                 if y is pipeline_null
                 else (
                     lambda *args, **kwargs: (
-                        __hide_pyccolo_frame__ and x(y, *args, **kwargs)
+                        __hide_pyccolo_frame__
+                        and self._resolve_piped(x, y)(y, *args, **kwargs)
                     )
                 )
             )
@@ -865,7 +957,7 @@ class PipelineTracer(pyc.BaseTracer):
                 if y is pipeline_null
                 else (
                     lambda *args, **kwargs: __hide_pyccolo_frame__
-                    and x(*y, *args, **kwargs)
+                    and self._resolve_piped(x, y)(*y, *args, **kwargs)
                 )
             )
         elif (
@@ -877,42 +969,44 @@ class PipelineTracer(pyc.BaseTracer):
                 if y is pipeline_null
                 else (
                     lambda *args, **kwargs: __hide_pyccolo_frame__
-                    and x(*args, **y, **kwargs)
+                    and self._resolve_piped(x, y)(*args, **y, **kwargs)
                 )
             )
         elif self.apply_op_spec in this_node_augmentations:
             return lambda x, y: (
-                __hide_pyccolo_frame__ and pipeline_null if y is pipeline_null else x(y)
+                __hide_pyccolo_frame__ and pipeline_null
+                if y is pipeline_null
+                else self._resolve_piped(x, y)(y)
             )
         elif self.apply_tuple_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if y is pipeline_null
-                else x(*y)
+                else self._resolve_piped(x, y)(*y)
             )
         elif self.apply_dict_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if y is pipeline_null
-                else x(**y)
+                else self._resolve_piped(x, y)(**y)
             )
         elif self.null_apply_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if y in (None, pipeline_null)
-                else x(y)
+                else self._resolve_piped(x, y)(y)
             )
         elif self.null_apply_tuple_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if y in (None, pipeline_null)
-                else x(*y)
+                else self._resolve_piped(x, y)(*y)
             )
         elif self.null_apply_dict_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if y in (None, pipeline_null)
-                else x(**y)
+                else self._resolve_piped(x, y)(**y)
             )
         else:
             return ret

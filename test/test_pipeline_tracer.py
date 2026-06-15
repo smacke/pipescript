@@ -1000,3 +1000,75 @@ def test_recursion():
             """
         )
     )
+
+
+def test_pipe_lambda_source_is_retrievable():
+    import inspect
+
+    PipelineTracer.keep_sandbox_source = True
+    try:
+        net = pyc.eval("$ |> str |> len")
+        assert inspect.getsource(net).strip() == "$ |> str |> len"
+        partial = pyc.eval("$ |> max($, 0)")
+        assert inspect.getsource(partial).strip() == "$ |> max($, 0)"
+    finally:
+        PipelineTracer.keep_sandbox_source = False
+
+    # Off by default: no source is kept (and no overhead per pipe).
+    plain = pyc.eval("$ |> str")
+    try:
+        inspect.getsource(plain)
+        assert False, "expected no source when keep_sandbox_source is off"
+    except OSError:
+        pass
+
+
+def test_application_hooks_fire_for_all_apply_operators():
+    # A hook that tags the result of whatever function it is given proves both
+    # that the hook fires and that its returned function is the one applied --
+    # for every operator that applies a function to a piped value, not just `|>`.
+    def tag_hook(func, value):
+        def wrapped(*args, **kwargs):
+            return ("hooked", func(*args, **kwargs))
+
+        return wrapped
+
+    PipelineTracer.application_hooks.append(tag_hook)
+    try:
+        assert pyc.eval("5 |> abs") == ("hooked", 5)  # pipe
+        assert pyc.eval("(2, 3) *|> max") == ("hooked", 3)  # tuple pipe
+        assert pyc.eval("{'x': 4} **|> (lambda x: x + 1)") == ("hooked", 5)  # dict pipe
+        assert pyc.eval("5 ?> abs") == ("hooked", 5)  # nullpipe (non-null)
+        assert pyc.eval("abs <| -5") == ("hooked", 5)  # apply
+        assert pyc.eval("max <|* (2, 3)") == ("hooked", 3)  # tuple apply
+        assert pyc.eval("abs <? -5") == ("hooked", 5)  # null apply (non-null)
+        # partial-apply ops resolve the function too (here, when the partial runs)
+        assert pyc.eval("5 $> max")(3) == ("hooked", 5)  # value-first partial
+        assert pyc.eval("max <$ 5")(3) == ("hooked", 5)  # function-first partial
+    finally:
+        PipelineTracer.application_hooks.remove(tag_hook)
+
+
+def test_application_hooks_default_to_no_op():
+    # With no hooks registered (the default), every operator applies plainly.
+    assert pyc.eval("5 |> abs") == 5
+    assert pyc.eval("(2, 3) *|> max") == 3
+    assert pyc.eval("abs <| -5") == 5
+    assert pyc.eval("5 $> max")(3) == 5
+
+
+def test_application_hook_receives_piped_value():
+    seen = []
+
+    def recording_hook(func, value):
+        seen.append(value)
+        return func
+
+    PipelineTracer.application_hooks.append(recording_hook)
+    try:
+        assert pyc.eval("7 |> abs") == 7
+        assert pyc.eval("(1, 9) *|> max") == 9
+        assert pyc.eval("abs <| -4") == 4  # apply: value is the right operand
+    finally:
+        PipelineTracer.application_hooks.remove(recording_hook)
+    assert seen == [7, (1, 9), -4]
