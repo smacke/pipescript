@@ -819,16 +819,81 @@ class MacroTracer(pyc.BaseTracer):
         block_globals = dict(frame.f_globals)
         block_globals.setdefault("_dynamic_lookup", _dynamic_lookup)
         local_ns: dict = {}
+        fname = self.make_sandbox_fname()
+        # Point tracebacks at the user's original block source instead of the
+        # synthetic `__pyc_macro_block__` sandbox: the parsed body's line numbers
+        # are 1-based into the (normalized) block, so registering that source in
+        # linecache lines failures up with what the user actually wrote.
+        self._register_block_linecache(fname, block_src, param_src)
         # exec_raw with instrument=False reuses the active trace (no reset) so
         # the already-instrumented nested macros still fire.
         self.exec_raw(
             module,
             global_env=block_globals,
             local_env=local_ns,
-            filename=self.make_sandbox_fname(),
+            filename=fname,
             instrument=False,
         )
         return local_ns["__pyc_macro_block__"]
+
+    #: Sandbox filenames whose linecache entry holds a block's original source.
+    #: Tracked so macro sub-lambdas compiled *inside* a block (e.g. ``fork``
+    #: branches) can alias the same source -- their line numbers already index
+    #: the block -- giving a traceback that points at the exact failing stage.
+    _block_linecache_files: set[str] = set()
+
+    @classmethod
+    def _register_block_linecache(
+        cls, fname: str, block_src: str, param_src: str
+    ) -> None:
+        """Register a block's source under its sandbox filename so a traceback
+        through the compiled block shows the user's lines.
+
+        ``block_src`` here is already normalized (column-0, no surrounding blank
+        lines) by :meth:`_compile_block_function`; its lines are 1-for-1 with the
+        ``param_src`` the body was parsed from (placeholder substitution is
+        in-place), so the friendlier ``$`` form is shown when aligned, falling
+        back to the desugared ``param_src`` otherwise."""
+        import linecache
+
+        display = block_src
+        if len(display.split("\n")) != len(param_src.split("\n")):
+            display = param_src
+        source = display + "\n"
+        linecache.cache[fname] = (
+            len(source),
+            None,
+            source.splitlines(keepends=True),
+            fname,
+        )
+        cls._block_linecache_files.add(fname)
+        # Keep this frame in tracebacks: both pipescript's and ipyflow's
+        # sandbox-frame filters consult this shared pyccolo registry.
+        pyc.mark_traceback_visible(fname)
+
+    @classmethod
+    def _alias_block_linecache(cls, frame: FrameType, fn: Any) -> None:
+        """If ``fn`` was compiled while executing a block, point its sandbox
+        filename at that block's source (line numbers already align), so a
+        traceback through ``fn`` -- e.g. a ``fork`` branch -- shows the exact
+        stage instead of an empty sandbox frame.
+
+        Only the *linecache* (and visibility) are adjusted here; the code object
+        is left untouched. Renaming an instrumented lambda's code (e.g. to read
+        ``<fork stage>`` rather than ``<lambda>``) breaks pyccolo's runtime
+        code-identity bookkeeping, so the meaningful source line is the win."""
+        import linecache
+
+        block_fname = frame.f_code.co_filename
+        if block_fname not in cls._block_linecache_files:
+            return
+        code = getattr(fn, "__code__", None)
+        entry = linecache.cache.get(block_fname)
+        if code is None or entry is None:
+            return
+        linecache.cache.setdefault(code.co_filename, entry)
+        cls._block_linecache_files.add(code.co_filename)
+        pyc.mark_traceback_visible(code.co_filename)
 
     def _handle_block_macro(
         self, node: ast.Subscript, frame: FrameType, func: str, block_id: int
@@ -839,6 +904,12 @@ class MacroTracer(pyc.BaseTracer):
         block_fn = self._compile_block_function(
             BraceBlockTracer.block_sources[block_id], frame
         )
+        # Give the block frame a meaningful name in tracebacks (e.g. `map{...}`)
+        # rather than the synthetic `__pyc_macro_block__`.
+        try:
+            block_fn.__code__ = block_fn.__code__.replace(co_name=f"{func}{{...}}")
+        except Exception:
+            pass
         # expose the compiled function so the macro wrapper can reference it
         gname = f"__pyc_block_fn_{id(block_fn)}__"
         frame.f_globals[gname] = block_fn
@@ -869,6 +940,7 @@ class MacroTracer(pyc.BaseTracer):
         if block_id is not None:
             callable_expr = self._handle_block_macro(node, frame, func, block_id)
             evaluated_lambda = pyc.eval(callable_expr, frame.f_globals, frame.f_locals)
+            self._alias_block_linecache(frame, evaluated_lambda)
             ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731
             self.lambda_cache[lambda_cache_key] = ret
             return ret
@@ -931,6 +1003,7 @@ class MacroTracer(pyc.BaseTracer):
         else:
             callable_expr = self._handle_macro_impl(node.slice, frame, func)
         evaluated_lambda = pyc.eval(callable_expr, frame.f_globals, frame.f_locals)
+        self._alias_block_linecache(frame, evaluated_lambda)
         ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731
         self.lambda_cache[lambda_cache_key] = ret
         return ret

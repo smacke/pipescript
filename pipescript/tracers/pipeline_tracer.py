@@ -214,6 +214,32 @@ class PipelineTracer(pyc.BaseTracer):
             func = hook(func, value)
         return func
 
+    def _apply(self, func: Any, piped: Any, node: ast.AST, star: int = 0) -> Any:
+        """Apply ``func`` to ``piped`` (``star`` selects ``f(x)`` / ``f(*x)`` /
+        ``f(**x)``), attaching a pipescript diagnostic note if the call raises.
+
+        This is the eager apply site for the pipe/apply operators, so a stage
+        that errors -- e.g. ``all(<a map[...] stage-function>)`` from using
+        ``|>`` where ``.>`` was meant -- gets pipeline-level context here, while
+        ``node`` (the pipe ``BinOp``) is still in scope.
+        """
+        __hide_pyccolo_frame__ = True  # noqa: F841
+        resolved = self._resolve_piped(func, piped)
+        try:
+            if star == 1:
+                return resolved(*piped)
+            elif star == 2:
+                return resolved(**piped)
+            else:
+                return resolved(piped)
+        except Exception as e:
+            from pipescript.patches.diagnostics import add_note, diagnose
+
+            hint = diagnose(e, node=node, value=piped, func=func)
+            if hint:
+                add_note(e, hint)
+            raise
+
     add_op_spec = pyc.AugmentationSpec(
         aug_type=pyc.AugmentationType.dot_prefix, token="[+]", replacement="f[$ + $]"
     )
@@ -856,19 +882,19 @@ class PipelineTracer(pyc.BaseTracer):
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if x is pipeline_null
-                else self._resolve_piped(y, x)(x)
+                else self._apply(y, x, node)
             )
         elif self.pipeline_tuple_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if x is pipeline_null
-                else self._resolve_piped(y, x)(*x)
+                else self._apply(y, x, node, star=1)
             )
         elif self.pipeline_dict_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if x is pipeline_null
-                else self._resolve_piped(y, x)(**x)
+                else self._apply(y, x, node, star=2)
             )
         elif self.pipeline_op_assign_spec in this_node_augmentations:
             rhs: ast.Name = node.right  # type: ignore
@@ -892,19 +918,19 @@ class PipelineTracer(pyc.BaseTracer):
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if x in (None, pipeline_null)
-                else self._resolve_piped(y, x)(x)
+                else self._apply(y, x, node)
             )
         elif self.nullpipe_tuple_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if x in (None, pipeline_null)
-                else self._resolve_piped(y, x)(*x)
+                else self._apply(y, x, node, star=1)
             )
         elif self.nullpipe_dict_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if x in (None, pipeline_null)
-                else self._resolve_piped(y, x)(**x)
+                else self._apply(y, x, node, star=2)
             )
         elif self.value_first_left_partial_apply_op_spec in this_node_augmentations:
             return lambda x, y: (
@@ -976,37 +1002,37 @@ class PipelineTracer(pyc.BaseTracer):
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if y is pipeline_null
-                else self._resolve_piped(x, y)(y)
+                else self._apply(x, y, node)
             )
         elif self.apply_tuple_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if y is pipeline_null
-                else self._resolve_piped(x, y)(*y)
+                else self._apply(x, y, node, star=1)
             )
         elif self.apply_dict_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if y is pipeline_null
-                else self._resolve_piped(x, y)(**y)
+                else self._apply(x, y, node, star=2)
             )
         elif self.null_apply_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if y in (None, pipeline_null)
-                else self._resolve_piped(x, y)(y)
+                else self._apply(x, y, node)
             )
         elif self.null_apply_tuple_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if y in (None, pipeline_null)
-                else self._resolve_piped(x, y)(*y)
+                else self._apply(x, y, node, star=1)
             )
         elif self.null_apply_dict_op_spec in this_node_augmentations:
             return lambda x, y: (
                 __hide_pyccolo_frame__ and pipeline_null
                 if y in (None, pipeline_null)
-                else self._resolve_piped(x, y)(**y)
+                else self._apply(x, y, node, star=2)
             )
         else:
             return ret

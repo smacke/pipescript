@@ -11,6 +11,27 @@ R = TypeVar("R")
 C = TypeVar("C", bound=Callable[..., Any])
 
 
+def _run_branch(
+    func: Callable[..., Any],
+    obj: Any,
+    extra: tuple[Any, ...],
+    label: str,
+    idx: int,
+    count: int,
+) -> Any:
+    """Call a ``fork``/``parallel`` branch, tagging any error with which branch
+    raised. Pairs with the apply-vs-compose hint from the pipeline tracer, which
+    says *what* went wrong; this says *which* branch."""
+    __hide_pyccolo_frame__ = True  # noqa: F841
+    try:
+        return func(obj, *extra)
+    except Exception as e:
+        from pipescript.patches.diagnostics import add_note
+
+        add_note(e, f"pipescript: ...in {label} branch #{idx + 1} of {count}")
+        raise
+
+
 # Like functoolz `do`
 def do(func: Callable[[T, *tuple[T]], Any], obj: T, *extra: T) -> T | tuple[T, ...]:
     # Hidden so a co-tracer (e.g. ipyflow) walking the stack from the user
@@ -30,8 +51,8 @@ def fork(
         # TODO: kinda hacky; is there a more robust way to signal the presence of an `otherwise` macro?
         return _fork_with_otherwise(funcs[1:], obj, *extra)
     results = []
-    for func in funcs:
-        results.append(func(obj, *extra))
+    for i, func in enumerate(funcs):
+        results.append(_run_branch(func, obj, extra, "fork", i, len(funcs)))
     return tuple(results)
 
 
@@ -44,8 +65,12 @@ def parallel(
         return _parallel_with_otherwise(funcs[1:], obj, *extra)
     futures = []
     with ThreadPoolExecutor(max_workers=len(funcs)) as executor:
-        for func in funcs:
-            futures.append(executor.submit(func, obj, *extra))
+        for i, func in enumerate(funcs):
+            futures.append(
+                executor.submit(
+                    _run_branch, func, obj, extra, "parallel", i, len(funcs)
+                )
+            )
     return tuple(fut.result() for fut in futures)
 
 
@@ -67,10 +92,12 @@ def _fork_with_otherwise(
     __hide_pyccolo_frame__ = True  # noqa: F841
     results: list[Any] = []
     func: Callable[[T, *tuple[T]], Any]
-    for func in funcs[:-1]:
-        results.append(func(obj, *extra))
+    for i, func in enumerate(funcs[:-1]):
+        results.append(_run_branch(func, obj, extra, "fork", i, len(funcs)))
     if all(res is pipeline_null for res in results):
-        results.append(funcs[-1](obj, *extra))
+        results.append(
+            _run_branch(funcs[-1], obj, extra, "fork", len(funcs) - 1, len(funcs))
+        )
     else:
         results.append(pipeline_null)
     return tuple(results)
@@ -82,11 +109,17 @@ def _parallel_with_otherwise(
     futures: list[Future[Any]] = []
     with ThreadPoolExecutor(max_workers=max(len(funcs) - 1, 32)) as executor:
         func: Callable[[T, *tuple[T]], Any]
-        for func in funcs[:-1]:
-            futures.append(executor.submit(func, obj, *extra))
+        for i, func in enumerate(funcs[:-1]):
+            futures.append(
+                executor.submit(
+                    _run_branch, func, obj, extra, "parallel", i, len(funcs)
+                )
+            )
     results = list(fut.result() for fut in futures)
     if all(res is pipeline_null for res in results):
-        results.append(funcs[-1](obj, *extra))
+        results.append(
+            _run_branch(funcs[-1], obj, extra, "parallel", len(funcs) - 1, len(funcs))
+        )
     else:
         results.append(pipeline_null)
     return tuple(results)

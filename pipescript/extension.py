@@ -3,6 +3,8 @@ from __future__ import annotations
 import functools
 import inspect
 import os
+import re
+import sys
 from types import FrameType, TracebackType
 from typing import TYPE_CHECKING, Any, Callable, cast
 
@@ -110,16 +112,22 @@ def filter_hidden_frames(tb: TracebackType | None) -> None:
         should_filter = False
         frame: FrameType = tb.tb_frame
         if prev is not None:
+            fname = frame.f_code.co_filename
+            # A sandbox frame marked traceback-visible (a compiled pipescript
+            # block, or a macro sub-lambda like a `fork` branch) is
+            # user-meaningful and pinpoints the failing stage -- keep it instead
+            # of filtering it as a synthetic sandbox frame.
             should_filter = frame.f_locals.get(HIDE_PYCCOLO_FRAME, False)
-            should_filter = should_filter or frame.f_code.co_filename.startswith(
-                SANDBOX_FNAME_PREFIX
+            should_filter = should_filter or (
+                fname.startswith(SANDBOX_FNAME_PREFIX)
+                and not pyc.is_traceback_visible(fname)
             )
             should_filter = should_filter or frame.f_code.co_name in (
                 TRACED_LAMBDA_NAME,
                 "_patched_eval",
                 "_patched_tracer_eval",
             )
-            should_filter = should_filter or "pyccolo" in frame.f_code.co_filename
+            should_filter = should_filter or "pyccolo" in fname
         if should_filter and prev is not None:
             prev.tb_next = tb.tb_next
         else:
@@ -127,13 +135,54 @@ def filter_hidden_frames(tb: TracebackType | None) -> None:
         tb = tb.tb_next
 
 
+_BLOCK_MARKER_RE = re.compile(r"\[__pyc_block__\(\d+\)\]")
+
+
+def resugar_block_markers(tb: TracebackType | None) -> None:
+    """Rewrite ``map[__pyc_block__(N)]`` markers to ``map{...}`` in the displayed
+    source of any frame in ``tb`` (most visibly the cell line), so the user sees
+    the brace block they wrote rather than the desugared marker."""
+    import linecache
+
+    seen: set[str] = set()
+    while tb is not None:
+        fname = tb.tb_frame.f_code.co_filename
+        if fname not in seen:
+            seen.add(fname)
+            entry = linecache.cache.get(fname)
+            if entry is not None and len(entry) == 4:
+                size, mtime, lines, fullname = entry
+                if lines and "__pyc_block__" in "".join(lines):
+                    linecache.cache[fname] = (
+                        size,
+                        mtime,
+                        [_BLOCK_MARKER_RE.sub("{...}", ln) for ln in lines],
+                        fullname,
+                    )
+        tb = tb.tb_next
+
+
 def make_patched_showtraceback(orig_showtraceback):
+    from pipescript.patches.diagnostics import annotate_pipescript_exception
+
     @functools.wraps(orig_showtraceback)
     def patched_showtraceback(self, *args, **kwargs):
+        evalue = None
         if os.getenv(PYCCOLO_DEV_MODE_ENV_VAR) != "1":
-            *_, tb = self._get_exc_info(kwargs.get("exc_tuple"))
+            etype, evalue, tb = self._get_exc_info(kwargs.get("exc_tuple"))
             filter_hidden_frames(tb)
+            try:
+                resugar_block_markers(tb)
+                annotate_pipescript_exception(etype, evalue, tb)
+            except Exception:
+                pass
         orig_showtraceback(self, *args, **kwargs)
+        # On <3.11 IPython won't render exception notes, so surface the
+        # pipescript ones ourselves (3.11+ shows native __notes__ already).
+        if sys.version_info < (3, 11) and evalue is not None:
+            notes = getattr(evalue, "_pyc_notes", None)
+            if notes:
+                sys.stderr.write("\n".join(notes) + "\n")
 
     return patched_showtraceback
 

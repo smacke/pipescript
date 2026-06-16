@@ -61,6 +61,15 @@ def load_ipython_extension_ipyflow(
     )
     shell.events.register("post_run_cell", clear_tracer_stacks)
     shell.events.register("post_run_cell", identify_dynamic_macros)
+    # Wrap ipyflow's own ``showtraceback`` so pipescript's traceback enrichment
+    # (re-sugar ``__pyc_block__`` markers, attach diagnostic notes, render them on
+    # <3.11) also runs under ipyflow -- its sandbox-frame filter already keeps the
+    # block frames visible via the shared pyccolo registry.
+    from pipescript.extension import make_patched_showtraceback
+
+    shell.__class__.showtraceback = make_patched_showtraceback(  # type: ignore[method-assign]
+        shell.__class__.showtraceback
+    )
     tracers = [
         cast(pyc.BaseTracer, cls).instance()
         for cls in [
