@@ -42,6 +42,48 @@ def _refresh(env: dict[str, Any]) -> None:
     MacroTracer.instance().reset()
 
 
+def test_namespace_block_macro_harvests_assignments():
+    from pipescript.tracers.macro_tracer import register_namespace_macro
+
+    register_namespace_macro("record", lambda ns: ns)
+    try:
+        # top-level assignments become dict entries; `_tmp` is a local temporary
+        # (excluded) but still usable within the block.
+        out = pyc.eval("record{\n  a = 1\n  b = a + 2\n  _tmp = 99\n  c = _tmp + b\n}")
+        assert out == {"a": 1, "b": 3, "c": 102}
+    finally:
+        MacroTracer.static_macros.pop("record", None)
+        MacroTracer.namespace_block_macros.pop("record", None)
+        __import__("builtins").__dict__.pop("record", None)
+
+
+def test_namespace_block_macro_applies_builder_and_sees_free_vars():
+    from pipescript.tracers.macro_tracer import register_namespace_macro
+
+    register_namespace_macro("scaled", lambda ns: {k: v * 10 for k, v in ns.items()})
+    try:
+        env = {"base": 5}
+        out = pyc.eval("scaled{\n  x = base\n  y = base + 1\n}", env, env)
+        assert out == {"x": 50, "y": 60}  # builder applied; `base` resolved as free var
+    finally:
+        MacroTracer.static_macros.pop("scaled", None)
+        MacroTracer.namespace_block_macros.pop("scaled", None)
+        __import__("builtins").__dict__.pop("scaled", None)
+
+
+def test_namespace_block_macro_supports_nested_pipescript():
+    from pipescript.tracers.macro_tracer import register_namespace_macro
+
+    register_namespace_macro("ns", lambda d: d)
+    try:
+        out = pyc.eval("ns{\n  evens = [1, 2, 3, 4] |> filter[$ % 2 == 0] |> list\n}")
+        assert out == {"evens": [2, 4]}  # `|>` inside the block still dispatches
+    finally:
+        MacroTracer.static_macros.pop("ns", None)
+        MacroTracer.namespace_block_macros.pop("ns", None)
+        __import__("builtins").__dict__.pop("ns", None)
+
+
 def test_quick_lambda_statement_block_with_for_loop():
     # the motivating example: a multi-line lambda with a for-loop, $ = input
     assert (
@@ -253,9 +295,7 @@ def test_method_macro_as_pipe_stage_with_placeholder_receiver():
     # must be bound by the stage lambda. Previously it evaluated as an unbound
     # name before the macro could fire ("name '_' is not defined").
     ns = pyc.exec(
-        "out = []\n"
-        "range(4) |> $.foreach[out.append($ ** 2)]\n"
-        "result = out"
+        "out = []\n" "range(4) |> $.foreach[out.append($ ** 2)]\n" "result = out"
     )
     assert ns["result"] == [0, 1, 4, 9], ns["result"]
 

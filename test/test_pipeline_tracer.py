@@ -526,6 +526,22 @@ def test_fork():
     assert pyc.eval("fork[$|>$+1, $|>$+2](0)") == (1, 2)
 
 
+def test_fork_branch_captures_free_vars():
+    # A branch that closes over free variables *and* pipes -- the shape of a "net"
+    # defined with pipescript syntax (e.g. ``A @ $ |> np.sum``) -- captures those
+    # free names as defaulted params. fork must not count them as positional
+    # placeholders, or the piped value can't fill the (spurious) extra arg.
+    ns = {"k": 10, "label": str}
+    assert pyc.eval("3 |> fork[k * $ |> label, $ + 1]", ns, ns) == ("30", 4)
+    assert pyc.eval("$ |> fork[k * $ |> label, $ + 1]", ns, ns)(3) == ("30", 4)
+    # an attribute-access function in a piped branch captures its object likewise
+    obj = type("O", (), {"twice": staticmethod(lambda v: v * 2)})()
+    assert pyc.eval("$ |> fork[$ |> o.twice, $ + 1]", {"o": obj}, {"o": obj})(5) == (
+        10,
+        6,
+    )
+
+
 def test_map_frozenset_list_set_tuple_eagerness():
     assert pyc.eval("[1, 2, 3] |> map[$ + 1]") == [2, 3, 4]
     assert pyc.eval("(1, 2, 3) |> map[$ + 1]") == (2, 3, 4)

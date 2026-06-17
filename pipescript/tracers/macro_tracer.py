@@ -11,7 +11,7 @@ import textwrap
 from contextlib import contextmanager
 from functools import reduce
 from types import FrameType
-from typing import Any, Generator, cast
+from typing import Any, Callable, Generator, cast
 
 import pyccolo as pyc
 from pyccolo import fast
@@ -373,6 +373,59 @@ def split_block_placeholders(src: str) -> tuple[str, list[str]]:
     return src, auto + named
 
 
+def _block_assigned_names(body: list[ast.stmt]) -> list[str]:
+    """Top-level names a namespace block binds, in source order (first occurrence
+    sets position). ``_``-prefixed names are treated as block-local temporaries
+    and excluded, so e.g. ``_scale = 0.1; w = _scale * ...`` harvests only ``w``."""
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def add(name: str) -> None:
+        if name.startswith("_") or name in seen:
+            return
+        seen.add(name)
+        names.append(name)
+
+    for stmt in body:
+        if isinstance(stmt, ast.Assign):
+            for tgt in stmt.targets:
+                if isinstance(tgt, ast.Name):
+                    add(tgt.id)
+                elif isinstance(tgt, (ast.Tuple, ast.List)):
+                    for elt in tgt.elts:
+                        if isinstance(elt, ast.Name):
+                            add(elt.id)
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            if stmt.value is not None:
+                add(stmt.target.id)
+        elif isinstance(stmt, ast.AugAssign) and isinstance(stmt.target, ast.Name):
+            add(stmt.target.id)
+    return names
+
+
+def register_namespace_macro(
+    name: str,
+    builder: Callable[[dict], Any],
+    call_form: Callable[..., Any] | None = None,
+) -> None:
+    """Register ``name{ a = ...; b = ... }`` as a namespace-block macro.
+
+    The brace block is run and its top-level assignments harvested into a dict,
+    which is passed to ``builder``; the macro evaluates to ``builder(namespace)``.
+    ``call_form``, if given, is exposed as the bare name ``name`` (a builtin in a
+    pipescript session) so the ordinary call form ``name(a=..., b=...)`` works too;
+    pass the function that ``builder`` delegates to. Registration must happen
+    before the cell/code using the macro is processed.
+    """
+    MacroTracer.namespace_block_macros[name] = builder
+    MacroTracer.static_macros[name] = call_form
+    # The macro name is still evaluated as an ordinary load before the
+    # subscript-load handler swaps in the macro machinery, so it must resolve to
+    # *something*; bind it as a builtin (the call form, or None as a placeholder)
+    # exactly as ``MacroTracer.__init__`` does for the built-in macros.
+    setattr(builtins, name, call_form)
+
+
 def is_static_macro(node: ast.AST) -> bool:
     return (
         isinstance(node, ast.Subscript)
@@ -443,6 +496,12 @@ class MacroTracer(pyc.BaseTracer):
     dynamic_macros: dict[str, DynamicMacro] = {}
 
     dynamic_method_macros: dict[str, DynamicMacro] = {}
+
+    #: Namespace-block macros: ``name`` -> builder. ``name{ a = ...; b = ... }``
+    #: runs the block, harvests its top-level assignments into a dict, and returns
+    #: ``builder(that_dict)``. Registered via :func:`register_namespace_macro`
+    #: (e.g. pyccolo's autodiff example wires ``params`` to its ``Param`` builder).
+    namespace_block_macros: dict[str, Callable[[dict], Any]] = {}
 
     builtin_dynamic_macro_definitions: dict[str, str] = {
         "foreach": "method[$$ |> map[do[$$]] |> list]",
@@ -750,12 +809,19 @@ class MacroTracer(pyc.BaseTracer):
             and n not in frame.f_globals
         }
 
-    def _compile_block_function(self, block_src: str, frame: FrameType):
+    def _compile_block_function(
+        self, block_src: str, frame: FrameType, namespace: bool = False
+    ):
         """Compile a stashed statement block into a function: the block's own
         ``$`` placeholders become parameters, the trailing expression becomes the
         return value, free variables resolve against the defining frame, and
         *nested* pipescript syntax (``|>``, ``f[...]``, ``f{...}``) is parsed,
         marked, and instrumented so it dispatches at runtime.
+
+        With ``namespace=True`` the function instead returns a ``dict`` of the
+        block's top-level assignments -- ``name = expr`` lines, excluding
+        ``_``-prefixed temporaries -- so a brace macro can harvest the block as a
+        namespace (e.g. ``params{ w = ...; b = ... }`` -> ``{"w": ..., "b": ...}``).
 
         The body is compiled via :meth:`~pyccolo.BaseTracer.parse_fragment`,
         which instruments the fragment from inside this active macro expansion
@@ -801,7 +867,21 @@ class MacroTracer(pyc.BaseTracer):
         target_body = body
         while len(target_body) == 1 and isinstance(target_body[0], ast.Try):
             target_body = target_body[0].body
-        if target_body and isinstance(target_body[-1], ast.Expr):
+        if namespace:
+            # Return a dict of the block's top-level assignments (collected from
+            # the clean, pre-instrumentation parse so pyccolo temporaries do not
+            # leak in). The Name loads reference block-local bindings, so they are
+            # not free vars and the FreeVarTransformer below leaves them alone.
+            names = _block_assigned_names(clean_body.body)
+            target_body.append(
+                ast.Return(
+                    value=ast.Dict(
+                        keys=[ast.Constant(value=n) for n in names],
+                        values=[ast.Name(id=n, ctx=ast.Load()) for n in names],
+                    )
+                )
+            )
+        elif target_body and isinstance(target_body[-1], ast.Expr):
             target_body[-1] = ast.Return(value=target_body[-1].value)
         if freevars:
             transformer = FreeVarTransformer(freevars, frame)
@@ -925,6 +1005,23 @@ class MacroTracer(pyc.BaseTracer):
                 )
         return ast_lambda
 
+    def _handle_namespace_block(
+        self, node: ast.Subscript, frame: FrameType, func: str, block_id: int
+    ) -> object:
+        __hide_pyccolo_frame__ = True  # noqa: F841
+        from pipescript.tracers.brace_block_tracer import BraceBlockTracer
+
+        block_fn = self._compile_block_function(
+            BraceBlockTracer.block_sources[block_id], frame, namespace=True
+        )
+        try:
+            block_fn.__code__ = block_fn.__code__.replace(co_name=f"{func}{{...}}")
+        except Exception:
+            pass
+        self._alias_block_linecache(frame, block_fn)
+        namespace = block_fn()  # runs the block; returns {name: value, ...}
+        return self.namespace_block_macros[func](namespace)
+
     @pyc.before_subscript_slice(when=is_static_macro, reentrant=True)
     def handle_macro(
         self, _ret, node: ast.Subscript, frame: FrameType, evt: TraceEvent, *_, **__
@@ -937,6 +1034,12 @@ class MacroTracer(pyc.BaseTracer):
         func = cast(ast.Name, node.value).id
         block_id = block_marker_id(node)
         callable_expr: ast.expr
+        if block_id is not None and func in self.namespace_block_macros:
+            # Eager: harvest the block's assignments and build the value now, at
+            # the point the statement runs (so e.g. random init is fresh per run).
+            # Not memoized in lambda_cache for that reason.
+            value = self._handle_namespace_block(node, frame, func, block_id)
+            return lambda: __hide_pyccolo_frame__ and value  # noqa: E731
         if block_id is not None:
             callable_expr = self._handle_block_macro(node, frame, func, block_id)
             evaluated_lambda = pyc.eval(callable_expr, frame.f_globals, frame.f_locals)
@@ -959,7 +1062,14 @@ class MacroTracer(pyc.BaseTracer):
                 expr_lambda = self._handle_macro_impl(expr, frame, "f")
                 callables.append(expr_lambda)
                 if isinstance(expr_lambda, ast.Lambda):
-                    max_nargs = max(max_nargs, len(expr_lambda.args.args))
+                    # Count only placeholder parameters; a branch that closes over
+                    # free variables (e.g. ``A @ $ |> np.sum`` captures ``A``/``np``)
+                    # carries them as *defaulted* params, which the piped value must
+                    # not be expected to fill.
+                    n_placeholders = len(expr_lambda.args.args) - len(
+                        expr_lambda.args.defaults
+                    )
+                    max_nargs = max(max_nargs, n_placeholders)
             has_otherwise = (
                 isinstance(expr, ast.Subscript)
                 and isinstance(expr.value, ast.Name)
