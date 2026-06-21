@@ -9,12 +9,15 @@ import ast
 import builtins
 import copy
 import functools
+import keyword
 import linecache
+import tokenize
 from types import FrameType
 from typing import Any, Callable, Sequence, cast
 
 import pyccolo as pyc
 from pyccolo.stmt_mapper import StatementMapper
+from pyccolo.syntax_augmentation import make_tokens_by_line
 from pyccolo.trace_events import TraceEvent
 
 import pipescript.api.utils
@@ -170,6 +173,123 @@ class PipelineTracer(pyc.BaseTracer):
     allow_reentrant_events = True
     global_guards_enabled = False
     multiple_threads_allowed = True
+
+    # Token types that carry no syntactic weight when deciding whether a ``|>``
+    # sits in *leading* (thunk) position.
+    _INSIGNIFICANT_TOKENS = frozenset(
+        {
+            tokenize.NL,
+            tokenize.NEWLINE,
+            tokenize.INDENT,
+            tokenize.DEDENT,
+            tokenize.COMMENT,
+            tokenize.ENCODING,
+            tokenize.ENDMARKER,
+        }
+    )
+
+    # A ``|>`` whose previous significant token is one of these *starts* an
+    # expression, so the ``|>`` is a leading-pipe thunk marker rather than an
+    # infix pipe. This is an allowlist on purpose: anything not listed here
+    # (names, literals, ``)``/``]``/``}``, the ``$`` placeholder -- which
+    # tokenizes as an ``ERRORTOKEN`` -- and any other stray token) defaults to
+    # *infix*, so existing pipeline syntax (notably ``$ |> ...``) is untouched.
+    _LEADING_STARTER_OPS = frozenset(
+        {
+            "=", "(", "[", "{", ",", ":", ";", ":=",
+            "+=", "-=", "*=", "/=", "//=", "**=", "%=", "@=",
+            "&=", "|=", "^=", ">>=", "<<=",
+        }
+    )
+    _LEADING_STARTER_KEYWORDS = frozenset(
+        {
+            "return", "yield", "else", "elif", "if", "while", "and", "or",
+            "not", "in", "is", "await", "assert", "lambda", "del", "raise",
+        }
+    )
+
+    @classmethod
+    def _rewrite_leading_pipes(cls, code: str) -> str:
+        """Rewrite a *leading* ``|>`` (one that starts an expression) to
+        ``lambda:``, turning ``fn = |> a |> b`` into a zero-arg thunk
+        ``fn = lambda: a |> b``. Must run before the ``|>`` -> ``|`` spec pass,
+        since a leading ``| ...`` is a syntax error. Infix ``|>`` are left for
+        that pass to lower normally."""
+        if "|>" not in code:
+            return code
+        try:
+            tokens = [
+                tok
+                for line in make_tokens_by_line(code.splitlines(keepends=True))
+                for tok in line
+            ]
+        except (tokenize.TokenError, IndentationError, SyntaxError):
+            return code
+        spans: list[tuple[tuple[int, int], tuple[int, int]]] = []
+        prev_sig: tokenize.TokenInfo | None = None
+        n = len(tokens)
+        for i, tok in enumerate(tokens):
+            if tok.type in cls._INSIGNIFICANT_TOKENS:
+                continue
+            # whitespace sometimes surfaces as an ERRORTOKEN next to ``$`` etc.
+            if tok.type == tokenize.ERRORTOKEN and tok.string.strip() == "":
+                continue
+            is_pipe = (
+                tok.type == tokenize.OP
+                and tok.string == "|"
+                and i + 1 < n
+                and tokens[i + 1].type == tokenize.OP
+                and tokens[i + 1].string == ">"
+                and tok.end == tokens[i + 1].start
+            )
+            if is_pipe:
+                gt = tokens[i + 1]
+                nxt = tokens[i + 2] if i + 2 < n else None
+                # leave ``|>>`` (pipe-assign) alone.
+                triple = (
+                    nxt is not None
+                    and nxt.type == tokenize.OP
+                    and nxt.string == ">"
+                    and gt.end == nxt.start
+                )
+                leading = prev_sig is None or (
+                    prev_sig.type == tokenize.OP
+                    and prev_sig.string in cls._LEADING_STARTER_OPS
+                ) or (
+                    prev_sig.type == tokenize.NAME
+                    and prev_sig.string in cls._LEADING_STARTER_KEYWORDS
+                )
+                if leading and not triple:
+                    spans.append((tok.start, gt.end))
+            prev_sig = tok
+        if not spans:
+            return code
+        line_starts = [0]
+        for line in code.splitlines(keepends=True):
+            line_starts.append(line_starts[-1] + len(line))
+
+        def _off(pos: tuple[int, int]) -> int:
+            row, col = pos
+            return line_starts[row - 1] + col
+
+        result = code
+        for start, end in sorted(spans, reverse=True):
+            result = result[: _off(start)] + "lambda:" + result[_off(end) :]
+        return result
+
+    def make_syntax_augmenter(self, ast_rewriter):
+        base = super().make_syntax_augmenter(ast_rewriter)
+
+        def _aug(lines):
+            is_list = isinstance(lines, list)
+            code = "".join(lines) if is_list else lines
+            code = self._rewrite_leading_pipes(code)
+            out = base(code)
+            if is_list and not isinstance(out, list):
+                return out.splitlines(keepends=True)
+            return out
+
+        return _aug
 
     def _pipe_source(self, lam: ast.AST) -> str | None:
         # Re-sugar a pipe lambda *before* pyc.eval weaves emit calls into it. Only

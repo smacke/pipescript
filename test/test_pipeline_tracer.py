@@ -1088,3 +1088,56 @@ def test_application_hook_receives_piped_value():
     finally:
         PipelineTracer.application_hooks.remove(recording_hook)
     assert seen == [7, (1, 9), -4]
+
+
+def test_thunk_basic():
+    # A leading ``|>`` defines a zero-arg pipeline (thunk).
+    fn = pyc.eval("|> (1, 2, 3) |> list")
+    assert fn() == [1, 2, 3]
+
+
+def test_thunk_zero_stage():
+    assert pyc.eval("|> 41 + 1")() == 42
+
+
+def test_thunk_stage_placeholder():
+    # ``$`` in non-first stages binds to the value flowing through that stage,
+    # exactly as in any value-led pipeline.
+    assert pyc.eval("|> 5 |> $ + 1 |> str")() == "6"
+    assert pyc.eval("|> (1, 2, 3) |> $[0] |> $ + 10")() == 11
+
+
+def test_thunk_assignment_reruns():
+    # A thunk is plain deferral, not memoization: each call re-runs the body.
+    ns = pyc.exec(
+        "calls = []\nfn = |> calls.append(1) |> (lambda _: len(calls))"
+    )
+    assert ns["fn"]() == 1
+    assert ns["fn"]() == 2
+
+
+def test_thunk_arity_zero():
+    fn = pyc.eval("|> (1, 2, 3) |> list")
+    with pytest.raises(TypeError):
+        fn(99)
+
+
+def test_thunk_closes_over_freevar():
+    ns = pyc.exec("y = 10\nthunk = |> y + 5")
+    assert ns["thunk"]() == 15
+
+
+def test_thunk_in_leading_contexts():
+    # call argument, list literal, and a ``return`` all start an expression.
+    assert pyc.eval("(lambda t: t())(|> 7 |> $ + 1)") == 8
+    assert [t() for t in pyc.eval("[|> 1, |> 2 |> $ + 5]")] == [1, 7]
+    ns = pyc.exec("def mk():\n    return |> 3 |> $ * 2\nr = mk()")
+    assert ns["r"]() == 6
+
+
+def test_leading_pipe_does_not_disturb_infix_pipes():
+    # Regression: the leading-pipe rewrite must leave infix ``|>`` and the
+    # one-arg ``$ |>`` form alone.
+    assert pyc.eval("(1, 2, 3) |> list") == [1, 2, 3]
+    assert pyc.eval("$ |> $ + 1")(41) == 42
+    assert pyc.eval("5 $> isinstance <| int") is True

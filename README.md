@@ -146,6 +146,28 @@ step of an pipescript pipeline, this *undetermined pipeline* will represent a fu
 6
 ```
 
+### Argument-less Pipelines (Thunks)
+
+Where `$ |> ...` defines a *one*-argument function, a *leading* `|>` defines a
+*zero*-argument one -- a thunk that defers a pipeline until you call it:
+
+```python
+>>> fetch = |> load() |> transform |> save
+>>> fetch()   # runs load() |> transform |> save now
+```
+
+The pipeline starts from its own seed (the first stage), so no input is needed.
+A leading `|>` is simply sugar for `lambda:` -- it works for any body, including
+a single stage (`thunk = |> expensive()`), and is re-run on every call (it is
+deferral, not memoization). Inside the body, `$` keeps its usual meaning in every
+stage *after* the seed:
+
+```python
+>>> describe = |> 5 |> $ + 1 |> str
+>>> describe()
+'6'
+```
+
 ### Macros and Partial Function Syntax
 
 In some cases, it may be desirable to curry a function with parameters at its start,
