@@ -1,6 +1,6 @@
 """
-Integration test: pyccolo's reverse-mode autodiff example driven through
-pipescript's ``|>`` pipe operator.
+Integration test: pycograd's reverse-mode autodiff driven through pipescript's
+``|>`` pipe operator.
 
 The pipe applies a function inside the PipelineTracer's own handler, not at an
 instrumented call site, so a co-active ``before_call`` autodiff tracer cannot see
@@ -8,7 +8,7 @@ it. ``PipelineTracer.application_hooks`` is the supported way to participate: we
 register a hook that, when the piped value is a ``Var``, resolves the function
 the same way ``before_call`` would (numpy/math swap, or helper instrumentation).
 
-Skipped unless numpy and the autodiff example (a recent pyccolo) are available.
+Skipped unless numpy and pycograd are available.
 """
 
 from __future__ import annotations
@@ -18,16 +18,17 @@ from typing import Generator
 import pytest
 
 np = pytest.importorskip("numpy")
-autodiff = pytest.importorskip("pyccolo.examples.autodiff")
+pycograd = pytest.importorskip("pycograd")
+models = pytest.importorskip("pycograd.examples.models")
 
 import pyccolo as pyc  # noqa: E402
 
 from pipescript.tracers.pipeline_tracer import PipelineTracer  # noqa: E402
 
-Var = autodiff.Var
-AutodiffTracer = autodiff.AutodiffTracer
-resolve_call = autodiff.resolve_call
-value_and_grad = autodiff.value_and_grad
+Var = pycograd.Var
+AutodiffTracer = pycograd.AutodiffTracer
+resolve_call = pycograd.resolve_call
+value_and_grad = pycograd.value_and_grad
 
 
 def _autodiff_hook(func: object, value: object) -> object:
@@ -112,9 +113,9 @@ def test_params_brace_surface_builds_param_pytree() -> None:
     from pipescript.tracers.macro_tracer import MacroTracer
     from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
 
-    autodiff.register_pipescript_params_macro()
+    pycograd.register_pipescript_params_macro()
     rng = np.random.default_rng(0)
-    ns = {"np": np, "rng": rng, "frozen": autodiff.frozen, "tied": autodiff.tied}
+    ns = {"np": np, "rng": rng, "frozen": pycograd.frozen, "tied": pycograd.tied}
     # frozen[...] and tied[...] bracket sub-macros: tied[w] ties to sibling w by
     # name, reusing its init; `_scale` is a block-local temporary (excluded).
     src = (
@@ -136,7 +137,7 @@ def test_params_brace_surface_builds_param_pytree() -> None:
         MacroTracer.namespace_block_macros.pop("params", None)
         __import__("builtins").__dict__.pop("params", None)
 
-    Param = autodiff.Param
+    Param = pycograd.Param
     assert sorted(model) == ["b", "w", "w_tied"]  # `_scale` temporary excluded
     assert isinstance(model["w"], Param) and model["w"].trainable
     assert isinstance(model["b"], Param) and not model["b"].trainable
@@ -148,7 +149,7 @@ def test_params_brace_surface_builds_param_pytree() -> None:
     _, (g,) = value_and_grad(_param_loss)(model)
     assert np.allclose(g["w"], 2 * model["w"].value)
     assert g["b"] is None
-    stepped = autodiff.sgd_update(model, g, lr=0.1)
+    stepped = pycograd.sgd_update(model, g, lr=0.1)
     assert np.allclose(stepped["b"].value, model["b"].value)  # frozen unchanged
 
 
@@ -194,12 +195,12 @@ def test_with_weights_pipe_forward_trains_and_infers_clean() -> None:
     setup = {
         "X": X,
         "Y": Y,
-        "softmax": autodiff.softmax,
-        "cross_entropy": autodiff.cross_entropy,
+        "softmax": models.softmax,
+        "cross_entropy": models.cross_entropy,
     }
     added = [k for k in setup if k not in g]  # only clean up what we introduce
     g.update({k: setup[k] for k in added})
-    weights = autodiff.params(w=0.1 * rng.standard_normal((3, 2)), b=np.zeros(2))
+    weights = pycograd.params(w=0.1 * rng.standard_normal((3, 2)), b=np.zeros(2))
     try:
         with BraceBlockTracer, PipelineTracer, MacroTracer, OptionalChainingTracer:
             with weights:  # inject proxies w, b into module globals
@@ -289,10 +290,10 @@ def test_highway_network_via_fork() -> None:
     d = 4
     X = rng.standard_normal((8, d))
     Y = np.tanh(X) + 0.5 * X  # a target to fit
-    setup = {"X": X, "Y": Y, "relu": autodiff.relu, "sigmoid": autodiff.sigmoid}
+    setup = {"X": X, "Y": Y, "relu": models.relu, "sigmoid": models.sigmoid}
     added = [k for k in setup if k not in g]
     g.update({k: setup[k] for k in added})
-    weights = autodiff.params(
+    weights = pycograd.params(
         Wh=0.3 * rng.standard_normal((d, d)),
         bh=np.zeros(d),
         Wt=0.3 * rng.standard_normal((d, d)),
