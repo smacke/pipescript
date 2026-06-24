@@ -1109,9 +1109,7 @@ def test_thunk_stage_placeholder():
 
 def test_thunk_assignment_reruns():
     # A thunk is plain deferral, not memoization: each call re-runs the body.
-    ns = pyc.exec(
-        "calls = []\nfn = |> calls.append(1) |> (lambda _: len(calls))"
-    )
+    ns = pyc.exec("calls = []\nfn = |> calls.append(1) |> (lambda _: len(calls))")
     assert ns["fn"]() == 1
     assert ns["fn"]() == 2
 

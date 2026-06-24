@@ -196,15 +196,47 @@ class PipelineTracer(pyc.BaseTracer):
     # *infix*, so existing pipeline syntax (notably ``$ |> ...``) is untouched.
     _LEADING_STARTER_OPS = frozenset(
         {
-            "=", "(", "[", "{", ",", ":", ";", ":=",
-            "+=", "-=", "*=", "/=", "//=", "**=", "%=", "@=",
-            "&=", "|=", "^=", ">>=", "<<=",
+            "=",
+            "(",
+            "[",
+            "{",
+            ",",
+            ":",
+            ";",
+            ":=",
+            "+=",
+            "-=",
+            "*=",
+            "/=",
+            "//=",
+            "**=",
+            "%=",
+            "@=",
+            "&=",
+            "|=",
+            "^=",
+            ">>=",
+            "<<=",
         }
     )
     _LEADING_STARTER_KEYWORDS = frozenset(
         {
-            "return", "yield", "else", "elif", "if", "while", "and", "or",
-            "not", "in", "is", "await", "assert", "lambda", "del", "raise",
+            "return",
+            "yield",
+            "else",
+            "elif",
+            "if",
+            "while",
+            "and",
+            "or",
+            "not",
+            "in",
+            "is",
+            "await",
+            "assert",
+            "lambda",
+            "del",
+            "raise",
         }
     )
 
@@ -252,12 +284,16 @@ class PipelineTracer(pyc.BaseTracer):
                     and nxt.string == ">"
                     and gt.end == nxt.start
                 )
-                leading = prev_sig is None or (
-                    prev_sig.type == tokenize.OP
-                    and prev_sig.string in cls._LEADING_STARTER_OPS
-                ) or (
-                    prev_sig.type == tokenize.NAME
-                    and prev_sig.string in cls._LEADING_STARTER_KEYWORDS
+                leading = (
+                    prev_sig is None
+                    or (
+                        prev_sig.type == tokenize.OP
+                        and prev_sig.string in cls._LEADING_STARTER_OPS
+                    )
+                    or (
+                        prev_sig.type == tokenize.NAME
+                        and prev_sig.string in cls._LEADING_STARTER_KEYWORDS
+                    )
                 )
                 if leading and not triple:
                     spans.append((tok.start, gt.end))
