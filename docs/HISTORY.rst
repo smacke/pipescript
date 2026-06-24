@@ -1,6 +1,13 @@
 History
 =======
 
+0.0.22 (2026-06-24)
+-------------------
+* Add argument-less pipelines via leading ``|>`` (thunks);
+* Support namespace-block macros and fix fork free-var arity;
+* Pinpoint pipeline-stage failures with meaningful errors;
+* Add pipe application hooks and pipe-lambda source retrieval;
+
 0.0.21 (2026-06-13)
 -------------------
 * Bind the ``$`` receiver of method macros used as pipe stages (e.g. ``xs |> $.foreach{ ... }``);
