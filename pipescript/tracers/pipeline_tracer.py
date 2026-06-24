@@ -9,7 +9,6 @@ import ast
 import builtins
 import copy
 import functools
-import keyword
 import linecache
 import tokenize
 from types import FrameType
