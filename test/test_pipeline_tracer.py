@@ -467,6 +467,18 @@ def test_tuple_pipeline_lambda():
     )
 
 
+def test_multi_arg_induced_pipeline():
+    # A pipeline whose seed has multiple placeholders induces a multi-arg function
+    # (each ``$`` is a new argument); stages after the seed see the piped value.
+    assert pyc.eval("$ + $ |> $ + 1")(3, 4) == 8
+    assert pyc.eval("$ * $ |> str")(3, 4) == "12"
+    assert pyc.eval("$ + $ * $ |> str")(1, 2, 3) == "7"
+    # A repeated *named* placeholder is a single argument used twice.
+    assert pyc.eval("$a + $a |> str")(5) == "10"
+    # The induced multi-arg function applies through the tuple pipe.
+    assert pyc.eval("(3, 4) *|> ($ + $ |> str)") == "7"
+
+
 def test_placeholder_arg_ordering():
     assert pyc.eval("(1, 2, 3) *|> ($x, $y, $z) *|> ($y, $z, $x)") == (2, 3, 1)
     assert pyc.eval("($x, $y, $z) *|> ($y, $z, $x) <|* (1, 2, 3)") == (2, 3, 1)
@@ -1027,6 +1039,14 @@ def test_pipe_lambda_source_is_retrievable():
         assert inspect.getsource(net).strip() == "$ |> str |> len"
         partial = pyc.eval("$ |> max($, 0)")
         assert inspect.getsource(partial).strip() == "$ |> max($, 0)"
+        # Multi-placeholder seeds resugar too, not just a bare leading ``$``.
+        multi = pyc.eval("$ + $ |> str")
+        assert inspect.getsource(multi).strip() == "$ + $ |> str"
+        triple = pyc.eval("$ + $ * $ |> str")
+        assert inspect.getsource(triple).strip() == "$ + $ * $ |> str"
+        # Named placeholders keep their name so the resugared arity is unambiguous.
+        named = pyc.eval("$a + $a |> str")
+        assert inspect.getsource(named).strip() == "$a + $a |> str"
     finally:
         PipelineTracer.keep_sandbox_source = False
 

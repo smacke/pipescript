@@ -146,6 +146,16 @@ step of an pipescript pipeline, this *undetermined pipeline* will represent a fu
 6
 ```
 
+Since each `$` in the seed is a new argument, the first step can introduce more
+than one, inducing a multi-argument function (using named placeholders here so
+each side is squared against itself):
+
+```python
+>>> hypotenuse = $a * $a + $b * $b |> $ ** 0.5
+>>> hypotenuse(3, 4)
+5.0
+```
+
 ### Argument-less Pipelines (Thunks)
 
 Where `$ |> ...` defines a *one*-argument function, a *leading* `|>` defines a

@@ -134,7 +134,14 @@ class _PlaceholderToDollar(ast.NodeTransformer):
 
     def visit_Name(self, node: ast.Name) -> ast.AST:
         if node.id in self._names:
-            return ast.copy_location(ast.Name(id="$", ctx=node.ctx), node)
+            if node.id == "_" or (node.id[0] == "_" and node.id[1:].isdigit()):
+                # bare auto-arg (``_``, ``_0``, ``_1``, ...) -> ``$``
+                new_id = "$"
+            else:
+                # named placeholder (``a``, ``b``, ...) -> ``$a`` so the resugared
+                # arity stays unambiguous (``$a + $a`` is one arg, ``$ + $`` is two)
+                new_id = "$" + node.id
+            return ast.copy_location(ast.Name(id=new_id, ctx=node.ctx), node)
         return node
 
 
@@ -158,14 +165,20 @@ def _resugar_pipe_lambda(lam: ast.AST) -> str | None:
         node = node.left
     chain.append(node)
     chain.reverse()
-    if not (isinstance(chain[0], ast.Name) and chain[0].id in placeholder_names):
+    # The seed must reference a placeholder for this to be an induced pipe lambda;
+    # it may be any expression (e.g. ``$ + $`` for a two-arg function), not just a
+    # bare ``$``. Shapes whose seed has no placeholder fall back to desugared.
+    if not any(
+        isinstance(n, ast.Name) and n.id in placeholder_names
+        for n in ast.walk(chain[0])
+    ):
         return None
 
     def render(expr: ast.expr) -> str:
         sub = _PlaceholderToDollar(placeholder_names).visit(copy.deepcopy(expr))
         return ast.unparse(ast.fix_missing_locations(sub))
 
-    return " |> ".join(["$"] + [render(stage) for stage in chain[1:]])
+    return " |> ".join(render(stage) for stage in chain)
 
 
 class PipelineTracer(pyc.BaseTracer):
