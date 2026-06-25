@@ -16,7 +16,13 @@ from typing import Any, Callable, Sequence, cast
 
 import pyccolo as pyc
 from pyccolo.stmt_mapper import StatementMapper
-from pyccolo.syntax_augmentation import make_tokens_by_line
+from pyccolo.syntax_augmentation import (
+    Range,
+    _line_starts,
+    line_col_of,
+    make_tokens_by_line,
+    offset_of,
+)
 from pyccolo.trace_events import TraceEvent
 
 import pipescript.api.utils
@@ -181,10 +187,90 @@ def _resugar_pipe_lambda(lam: ast.AST) -> str | None:
     return " |> ".join(render(stage) for stage in chain)
 
 
+class _LeadingPipeRewrite(pyc.CustomRewrite):
+    """Custom rewrite for *leading* ``|>`` thunks (``f = |> a |> b``). The leading
+    ``|>`` is lowered to ``lambda:`` so the arg-less pipeline parses, and
+    ``untransform`` strips that synthesized ``lambda:`` back to a leading ``|>``.
+
+    Driving this through pyccolo's spec/``CustomRewrite`` framework (rather than a
+    bespoke ``make_syntax_augmenter`` override) means it threads source positions,
+    applies identically on the import and eval/exec paths, and is reversible via
+    ``untransform`` -- the body's ``|>``/``$`` are reversed by their own
+    (``pipeline_op_spec`` / ``arg_placeholder_spec``) specs, so only the
+    ``lambda:`` prefix is this rewrite's to undo."""
+
+    _REPLACEMENT = "lambda:"
+
+    def rewrite(self, code, register):
+        spans = PipelineTracer._leading_pipe_spans(code)
+        if not spans:
+            return code, []
+        # Splice right-to-left so earlier offsets stay valid as we replace each
+        # ``|>`` with ``lambda:``.
+        result = code
+        for start, end in sorted(spans, reverse=True):
+            result = result[:start] + self._REPLACEMENT + result[end:]
+        # Edits in INPUT coordinates: each ``|>`` span -> len("lambda:").
+        edits = [(start, end, len(self._REPLACEMENT)) for start, end in spans]
+        edits.sort()
+        # Register each inserted ``lambda`` anchor in OUTPUT coordinates so it
+        # binds to the synthesized ``Lambda`` node (its ``col_offset``).
+        out_starts = _line_starts(result)
+        delta = 0
+        for start, end in sorted(spans):
+            anchor = line_col_of(out_starts, start + delta)
+            register(anchor.line, anchor.col)
+            delta += len(self._REPLACEMENT) - (end - start)
+        return result, edits
+
+    def range_for(self, node):
+        if isinstance(node, ast.Lambda):
+            return Range.singleton_span(node.lineno, node.col_offset)
+        return None
+
+    def reverse(self, node, spec, aug_range, code, line_starts):
+        # Only a genuinely arg-less thunk reverses to a leading ``|>``; a lambda
+        # with any parameter (e.g. an induced placeholder pipe lambda) is not ours.
+        if not isinstance(node, ast.Lambda):
+            return None
+        args = node.args
+        if (
+            args.args
+            or getattr(args, "posonlyargs", None)
+            or args.kwonlyargs
+            or args.vararg
+            or args.kwarg
+            or args.defaults
+            or args.kw_defaults
+        ):
+            return None
+        body = node.body
+        start = offset_of(line_starts, node.lineno, node.col_offset)
+        body_off = offset_of(line_starts, body.lineno, body.col_offset)
+        if body_off <= start:
+            return None
+        # Replace just the ``lambda:`` prefix (lambda keyword up to the body) with
+        # a leading ``|>``; the body's own ``|`` -> ``|>`` and ``_`` -> ``$``
+        # reverses are emitted by their specs and don't overlap this span.
+        return (start, body_off, "|> ")
+
+
 class PipelineTracer(pyc.BaseTracer):
     allow_reentrant_events = True
     global_guards_enabled = False
     multiple_threads_allowed = True
+
+    # Leading-``|>`` thunks, as a custom (context-sensitive) augmentation so the
+    # rewrite threads positions, applies on both the import and eval/exec paths,
+    # and round-trips through ``untransform``. Must lower before the ``|>`` ->
+    # ``|`` ``pipeline_op_spec`` pass; ``_apply_augmentations`` runs custom specs
+    # first, so this ordering holds.
+    leading_pipe_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.custom,
+        token="|>",
+        replacement="lambda:",
+        custom=_LeadingPipeRewrite(),
+    )
 
     # Token types that carry no syntactic weight when deciding whether a ``|>``
     # sits in *leading* (thunk) position.
@@ -253,14 +339,15 @@ class PipelineTracer(pyc.BaseTracer):
     )
 
     @classmethod
-    def _rewrite_leading_pipes(cls, code: str) -> str:
-        """Rewrite a *leading* ``|>`` (one that starts an expression) to
-        ``lambda:``, turning ``fn = |> a |> b`` into a zero-arg thunk
-        ``fn = lambda: a |> b``. Must run before the ``|>`` -> ``|`` spec pass,
-        since a leading ``| ...`` is a syntax error. Infix ``|>`` are left for
-        that pass to lower normally."""
+    def _leading_pipe_spans(cls, code: str) -> list[tuple[int, int]]:
+        """Absolute ``(start, end)`` char-offset spans of every *leading* ``|>``
+        (one that starts an expression). A leading ``|>`` opens an arg-less
+        pipeline (thunk): :class:`_LeadingPipeRewrite` rewrites each span to
+        ``lambda:``, which must happen before the ``|>`` -> ``|`` spec pass since a
+        leading ``| ...`` is a syntax error. Infix ``|>`` are left for that pass to
+        lower normally."""
         if "|>" not in code:
-            return code
+            return []
         try:
             tokens = [
                 tok
@@ -268,7 +355,7 @@ class PipelineTracer(pyc.BaseTracer):
                 for tok in line
             ]
         except (tokenize.TokenError, IndentationError, SyntaxError):
-            return code
+            return []
         spans: list[tuple[tuple[int, int], tuple[int, int]]] = []
         prev_sig: tokenize.TokenInfo | None = None
         n = len(tokens)
@@ -311,33 +398,13 @@ class PipelineTracer(pyc.BaseTracer):
                     spans.append((tok.start, gt.end))
             prev_sig = tok
         if not spans:
-            return code
-        line_starts = [0]
-        for line in code.splitlines(keepends=True):
-            line_starts.append(line_starts[-1] + len(line))
+            return []
+        starts = _line_starts(code)
 
         def _off(pos: tuple[int, int]) -> int:
-            row, col = pos
-            return line_starts[row - 1] + col
+            return offset_of(starts, pos[0], pos[1])
 
-        result = code
-        for start, end in sorted(spans, reverse=True):
-            result = result[: _off(start)] + "lambda:" + result[_off(end) :]
-        return result
-
-    def make_syntax_augmenter(self, ast_rewriter):
-        base = super().make_syntax_augmenter(ast_rewriter)
-
-        def _aug(lines):
-            is_list = isinstance(lines, list)
-            code = "".join(lines) if is_list else lines
-            code = self._rewrite_leading_pipes(code)
-            out = base(code)
-            if is_list and not isinstance(out, list):
-                return out.splitlines(keepends=True)
-            return out
-
-        return _aug
+        return [(_off(start), _off(end)) for start, end in spans]
 
     def _pipe_source(self, lam: ast.AST) -> str | None:
         # Re-sugar a pipe lambda *before* pyc.eval weaves emit calls into it. Only

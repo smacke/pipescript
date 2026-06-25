@@ -337,10 +337,36 @@ def test_block_marker_emission_is_idempotent():
     # the executed pass emits and the cell runs uninstrumented.
     tracer = BraceBlockTracer.instance()
     code = "xs |> map{ $ + 10 } |> list"
-    first = tracer._augment(code)
-    second = tracer._augment(code)
+    first = tracer.preprocess(code, None)
+    second = tracer.preprocess(code, None)
     assert first == second, (first, second)
     assert "__pyc_block__(" in first, first
+
+
+def test_brace_untransform_roundtrip():
+    # The brace rewrite rides pyccolo's custom-augmentation framework, so
+    # ``untransform`` resugars ``macro[...]`` back to the ``macro{...}`` the user
+    # wrote -- statement blocks recover their verbatim source, tuple templates
+    # normalize spacing.
+    t = OptionalChainingTracer.instance()
+    expr_block = "xs |> map{ $ + 10 } |> list"
+    assert t.untransform(t.parse(expr_block, instrument=False)) == expr_block
+    stmt_block = "xs |> map{ acc = 0; acc + $ } |> list"
+    assert t.untransform(t.parse(stmt_block, instrument=False)) == stmt_block
+    chained = "ys |> map{ $ * 2 } |> filter{ $ > 3 } |> list"
+    assert t.untransform(t.parse(chained, instrument=False)) == chained
+    # fork/parallel tuple templates resugar (ast.unparse normalizes the spacing)
+    assert t.untransform(t.parse("fork{ f1, f2 }", instrument=False)) == "fork{f1, f2}"
+
+
+def test_brace_rewrite_threads_positions():
+    # The old preprocess override dropped the positions argument; the custom
+    # rewrite threads it, so a tracked location survives the brace rewrite.
+    t = OptionalChainingTracer.instance()
+    src = "xs |> map{ $ + 10 } |> list"
+    out, positions = t.transform(src, positions=[(1, 0), (1, src.index("list"))])
+    assert out.splitlines()[0][positions[0][1] : positions[0][1] + 2] == "xs"
+    assert out.splitlines()[positions[1][0] - 1][positions[1][1] :].startswith("list")
 
 
 def test_block_marker_is_a_resolvable_sentinel_call():

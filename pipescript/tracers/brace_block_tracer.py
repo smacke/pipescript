@@ -15,6 +15,13 @@ Lets any macro that is normally written ``macro[ ... ]`` also be written
   function's parameters, exactly like the expression case, and the trailing
   expression becomes the return value.
 
+The rewrite rides pyccolo's custom-augmentation framework (a
+:class:`~pyccolo.CustomRewrite` carried by :data:`BraceBlockTracer.brace_spec`)
+rather than a bespoke ``preprocess`` / ``make_syntax_augmenter`` override. That
+means it threads source positions through the rewrite (the old override silently
+dropped them) and round-trips through ``untransform`` -- ``macro[...]`` resugars
+back to ``macro{...}`` -- instead of needing a parallel regex resugarer.
+
 Enter this tracer **outermost** (before ``PipelineTracer``) so the brace
 extraction happens before the ``$`` -> ``_`` placeholder pass; that keeps the
 captured body's ``$`` intact (re-processed later) and avoids registering stale
@@ -26,7 +33,109 @@ from __future__ import annotations
 import ast
 
 import pyccolo as pyc
-from pyccolo.syntax_augmentation import make_paired_delimiter_augmenter
+from pyccolo.syntax_augmentation import (
+    Range,
+    _find_first_paired_construct,
+    _line_starts,
+    line_col_of,
+    offset_of,
+)
+
+
+class _BraceRewrite(pyc.CustomRewrite):
+    """Custom rewrite turning ``macro{ ... }`` into ``macro[ ... ]`` (tuple
+    template) or ``macro[__pyc_block__(N)]`` (statement block), and reversing
+    either back to ``macro{ ... }`` during ``untransform``.
+
+    The tuple-vs-block decision is per-occurrence and context-sensitive (it parses
+    the body), which a static :class:`~pyccolo.AugmentationSpec` can't express --
+    hence a custom rewrite rather than a plain paired spec / ``body_func_wrapper``.
+    """
+
+    def rewrite(self, code, register):
+        names = BraceBlockTracer._macro_names()
+        if not names or "{" not in code:
+            return code, []
+        name_predicate = lambda nm: nm in names  # noqa: E731
+        edits: list[tuple[int, int, int]] = []
+        bracket_offsets: list[int] = []
+        # ``delta`` maps an offset in the *current* (partially-rewritten) ``code``
+        # back to the original input: the cumulative length change of all prior
+        # (left-of-here) splices. Top-level constructs are matched left-to-right
+        # and are disjoint -- a block body is stashed as a string (never
+        # re-scanned) and a tuple body is brace-free (a nested ``{`` would make it
+        # unparseable as a tuple, routing it to the block path instead) -- so the
+        # resulting edits are sorted and non-overlapping in original coordinates.
+        delta = 0
+        while True:
+            match = _find_first_paired_construct(code, name_predicate, "{", "}")
+            if match is None:
+                break
+            starts = _line_starts(code)
+
+            def _abs(pos: tuple[int, int]) -> int:
+                return offset_of(starts, pos[0], pos[1])
+
+            name_start = _abs(match.name_start)
+            close_end = _abs(match.close_end)
+            inner = code[_abs(match.open_end) : _abs(match.close_start)]
+            replacement = BraceBlockTracer._emit(match.name, inner)
+            edits.append((name_start - delta, close_end - delta, len(replacement)))
+            delta += len(replacement) - (close_end - name_start)
+            # The ``[`` lands right after NAME; every later splice is to its right,
+            # so this offset is already final.
+            bracket_offsets.append(name_start + len(match.name))
+            code = code[:name_start] + replacement + code[close_end:]
+        final_starts = _line_starts(code)
+        for off in bracket_offsets:
+            anchor = line_col_of(final_starts, off)
+            register(anchor.line, anchor.col)
+        return code, edits
+
+    def range_for(self, node):
+        # Anchor at the ``[`` (immediately after the macro name), mirroring
+        # ``AstRewriter._get_subscript_range_for``. Only Subscript nodes whose
+        # ``[`` offset was registered (i.e. brace-derived) actually bind the spec.
+        if not isinstance(node, ast.Subscript):
+            return None
+        end_lineno = getattr(node.value, "end_lineno", None)
+        end_col = getattr(node.value, "end_col_offset", None)
+        if end_lineno is None or end_col is None:
+            return None
+        return Range.singleton_span(end_lineno, end_col)
+
+    def reverse(self, node, spec, aug_range, code, line_starts):
+        from pipescript.tracers.macro_tracer import block_marker_id
+
+        if not isinstance(node, ast.Subscript):
+            return None
+        open_lineno = getattr(node.value, "end_lineno", None)
+        open_col = getattr(node.value, "end_col_offset", None)
+        end_lineno = getattr(node, "end_lineno", None)
+        end_col = getattr(node, "end_col_offset", None)
+        if None in (open_lineno, open_col, end_lineno, end_col):
+            return None
+        open_off = offset_of(line_starts, open_lineno, open_col)
+        end_off = offset_of(line_starts, end_lineno, end_col)
+        block_id = block_marker_id(node)
+        if block_id is not None:
+            # Statement block: recover the verbatim source the marker stands for;
+            # fall back to the unparsed marker if it's no longer stashed.
+            inner = BraceBlockTracer.block_sources.get(block_id)
+            if inner is None:
+                inner = ast.unparse(node.slice)
+        else:
+            # Tuple template (``fork{ f1, f2 }``): the slice is the body verbatim.
+            sliced = node.slice
+            if isinstance(sliced, ast.Index):  # py3.8 compatibility shim
+                sliced = sliced.value  # type: ignore[attr-defined]
+            if isinstance(sliced, ast.Tuple):
+                # Drop the parens ``ast.unparse`` adds around a bare tuple so the
+                # resugared body reads ``{f1, f2}`` rather than ``{(f1, f2)}``.
+                inner = ", ".join(ast.unparse(e) for e in sliced.elts)
+            else:
+                inner = ast.unparse(sliced)
+        return (open_off, end_off, "{" + inner + "}")
 
 
 class BraceBlockTracer(pyc.BaseTracer):
@@ -42,6 +151,16 @@ class BraceBlockTracer(pyc.BaseTracer):
     # the cell silently runs uninstrumented.
     _id_by_source: dict[str, int] = {}
     _counter = 0
+
+    # The brace rewrite, as a custom augmentation so it threads positions and is
+    # reversible via ``untransform``. This is BraceBlockTracer's only spec, so it
+    # runs in this (outermost) tracer's augmentation pass, before PipelineTracer's.
+    brace_spec = pyc.AugmentationSpec(
+        aug_type=pyc.AugmentationType.custom,
+        token="{",
+        replacement="[",
+        custom=_BraceRewrite(),
+    )
 
     @staticmethod
     def _macro_names() -> set[str]:
@@ -70,8 +189,9 @@ class BraceBlockTracer(pyc.BaseTracer):
             return False
         return isinstance(tree.body, ast.Tuple)
 
-    def _emit(self, name: str, inner: str) -> str:
-        if self._is_tuple_expression(inner):
+    @classmethod
+    def _emit(cls, name: str, inner: str) -> str:
+        if cls._is_tuple_expression(inner):
             # fork/parallel multi-function template: brace-for-bracket swap and
             # let the normal expression machinery handle it.
             return f"{name}[{inner}]"
@@ -80,12 +200,12 @@ class BraceBlockTracer(pyc.BaseTracer):
         # (e.g. `foreach` expands to `... |> map[do[<marker>]] |> ...`) and is
         # compiled into a function -- with collapse-`$` semantics and its own
         # scope -- by MacroTracer when the consuming macro is expanded.
-        n = BraceBlockTracer._id_by_source.get(inner)
+        n = cls._id_by_source.get(inner)
         if n is None:
-            BraceBlockTracer._counter += 1
-            n = BraceBlockTracer._counter
-            BraceBlockTracer._id_by_source[inner] = n
-            BraceBlockTracer.block_sources[n] = inner
+            cls._counter += 1
+            n = cls._counter
+            cls._id_by_source[inner] = n
+            cls.block_sources[n] = inner
         # Emit the marker as a call to the defined sentinel `__pyc_block__(N)`
         # rather than a bare (undefined) name: under ipyflow the slice expression
         # is evaluated before the macro handler can substitute it, so an
@@ -94,24 +214,3 @@ class BraceBlockTracer(pyc.BaseTracer):
         from pipescript.tracers.macro_tracer import BLOCK_MARKER_FUNC
 
         return f"{name}[{BLOCK_MARKER_FUNC}({n})]"
-
-    def _augment(self, code: str) -> str:
-        names = self._macro_names()
-        if not names:
-            return code
-        return make_paired_delimiter_augmenter(names, self._emit)(code)
-
-    def preprocess(self, code, rewriter):
-        code = super().preprocess(code, rewriter)
-        return self._augment(code)
-
-    def make_syntax_augmenter(self, ast_rewriter):
-        base = super().make_syntax_augmenter(ast_rewriter)
-
-        def _aug(lines):
-            out = base(lines)
-            if isinstance(out, list):
-                return self._augment("".join(out)).splitlines(keepends=True)
-            return self._augment(out)
-
-        return _aug

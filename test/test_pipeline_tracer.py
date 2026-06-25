@@ -1159,3 +1159,28 @@ def test_leading_pipe_does_not_disturb_infix_pipes():
     assert pyc.eval("(1, 2, 3) |> list") == [1, 2, 3]
     assert pyc.eval("$ |> $ + 1")(41) == 42
     assert pyc.eval("5 $> isinstance <| int") is True
+
+
+def test_thunk_untransform_roundtrip():
+    # The leading-pipe thunk rewrite is a pyccolo custom augmentation, so
+    # ``untransform`` strips the synthesized ``lambda:`` back to the leading
+    # ``|>`` the user wrote (the body's ``|>`` / ``$`` are reversed by their own
+    # specs). Infix pipelines are unaffected.
+    t = PipelineTracer.instance()
+    for src in (
+        "f = |> (1, 2, 3) |> list",
+        "g = |> 5 |> $ + 1 |> str",
+        "[|> 1, |> 2 |> $ + 5]",
+        "x = (1, 2, 3) |> list",
+    ):
+        assert t.untransform(t.parse(src, instrument=False)) == src
+
+
+def test_thunk_rewrite_threads_positions():
+    # The leading-pipe rewrite threads tracked positions (the old override did
+    # not): a location in the body survives the ``|>`` -> ``lambda:`` rewrite.
+    t = PipelineTracer.instance()
+    src = "f = |> 5 |> str"
+    out, positions = t.transform(src, positions=[(1, src.index("5"))])
+    line, col = positions[0]
+    assert out.splitlines()[line - 1][col] == "5"
