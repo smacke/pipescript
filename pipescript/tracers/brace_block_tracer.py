@@ -31,6 +31,9 @@ placeholder positions for source that has been moved out of band.
 from __future__ import annotations
 
 import ast
+import threading
+from collections.abc import MutableMapping
+from typing import Iterator, TypeVar
 
 import pyccolo as pyc
 from pyccolo.syntax_augmentation import (
@@ -40,6 +43,50 @@ from pyccolo.syntax_augmentation import (
     line_col_of,
     offset_of,
 )
+
+_K = TypeVar("_K")
+_V = TypeVar("_V")
+
+
+class _ThreadLocalDict(MutableMapping[_K, _V]):
+    """A dict-like mapping with independent per-thread storage.
+
+    ``block_sources`` / ``_id_by_source`` are written and read on the execution
+    thread, but a second consumer (e.g. an in-kernel language server linting on a
+    background thread) also drives the brace augmenter against the live tracer
+    singletons. Per-thread storage gives each thread its own body registry, so an
+    analysis pass on one thread can't overwrite the body a concurrent execution
+    registered on another. ipyflow's several augmenter passes per cell all run on
+    the same (execution) thread, so they still share one store -- the
+    ``_id_by_source`` dedup stays idempotent within a cell.
+
+    ``_counter`` deliberately stays a shared class int: it only mints ids, and
+    once the maps it indexes are per-thread a duplicated id can't cross threads.
+    """
+
+    def __init__(self) -> None:
+        self._local = threading.local()
+
+    def _store(self) -> "dict[_K, _V]":
+        store = getattr(self._local, "store", None)
+        if store is None:
+            store = self._local.store = {}
+        return store
+
+    def __getitem__(self, key: _K) -> _V:
+        return self._store()[key]
+
+    def __setitem__(self, key: _K, value: _V) -> None:
+        self._store()[key] = value
+
+    def __delitem__(self, key: _K) -> None:
+        del self._store()[key]
+
+    def __iter__(self) -> Iterator[_K]:
+        return iter(self._store())
+
+    def __len__(self) -> int:
+        return len(self._store())
 
 
 class _BraceRewrite(pyc.CustomRewrite):
@@ -141,15 +188,18 @@ class _BraceRewrite(pyc.CustomRewrite):
 class BraceBlockTracer(pyc.BaseTracer):
     global_guards_enabled = False
 
-    # raw statement-body source keyed by marker id; read by MacroTracer
-    block_sources: dict[int, str] = {}
+    # raw statement-body source keyed by marker id; read by MacroTracer. Backed
+    # by per-thread storage (see ``_ThreadLocalDict``) so a lint/analysis pass on
+    # a background thread can't clobber the body a concurrent execution registered.
+    block_sources: MutableMapping[int, str] = _ThreadLocalDict()
     # reverse map (source -> id) so a given block always gets the *same* marker:
     # ipyflow invokes the syntax augmenter several times per cell (liveness,
     # analysis, execution), and a fresh id each pass would make the augmenter
     # non-idempotent -- the rewriter's instrumentation, set up against one pass's
     # output, then fails to line up with the marker the executed pass emits, and
-    # the cell silently runs uninstrumented.
-    _id_by_source: dict[str, int] = {}
+    # the cell silently runs uninstrumented. (Those passes share a thread, so the
+    # per-thread store keeps dedup idempotent within a cell.)
+    _id_by_source: MutableMapping[str, int] = _ThreadLocalDict()
     _counter = 0
 
     # The brace rewrite, as a custom augmentation so it threads positions and is
@@ -193,8 +243,23 @@ class BraceBlockTracer(pyc.BaseTracer):
     def _emit(cls, name: str, inner: str) -> str:
         if cls._is_tuple_expression(inner):
             # fork/parallel multi-function template: brace-for-bracket swap and
-            # let the normal expression machinery handle it.
+            # let the normal expression machinery handle it. (Side-effect free, so
+            # it's safe under a pure transform too.)
             return f"{name}[{inner}]"
+        # Emit the marker as a call to the defined sentinel `__pyc_block__(N)`
+        # rather than a bare (undefined) name: under ipyflow the slice expression
+        # is evaluated before the macro handler can substitute it, so an
+        # undefined marker name would leak as a `NameError`. See
+        # `macro_tracer.block_marker_id` / `_block_marker_sentinel`.
+        from pipescript.tracers.macro_tracer import BLOCK_MARKER_FUNC
+
+        if pyc.is_pure_transform():
+            # Analysis-only transform (lint / format / source-map): emit a valid,
+            # lintable marker but DON'T register a body or bump shared counters.
+            # The lowered code is never executed, and mutating the process-global
+            # registries the runtime later reads would corrupt a concurrent
+            # execution (the original bug this guards against).
+            return f"{name}[{BLOCK_MARKER_FUNC}(0)]"
         # Everything else (single expressions and statement bodies) is stashed
         # and replaced with a marker. The marker flows through macro expansion
         # (e.g. `foreach` expands to `... |> map[do[<marker>]] |> ...`) and is
@@ -206,11 +271,4 @@ class BraceBlockTracer(pyc.BaseTracer):
             n = cls._counter
             cls._id_by_source[inner] = n
             cls.block_sources[n] = inner
-        # Emit the marker as a call to the defined sentinel `__pyc_block__(N)`
-        # rather than a bare (undefined) name: under ipyflow the slice expression
-        # is evaluated before the macro handler can substitute it, so an
-        # undefined marker name would leak as a `NameError`. See
-        # `macro_tracer.block_marker_id` / `_block_marker_sentinel`.
-        from pipescript.tracers.macro_tracer import BLOCK_MARKER_FUNC
-
         return f"{name}[{BLOCK_MARKER_FUNC}({n})]"

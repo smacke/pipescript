@@ -398,3 +398,100 @@ def test_method_macro_survives_bookkeeping_reset():
         ids.clear()
     out = pyc.exec("seen = []\n[1, 2, 3].myeach[do[seen.append($)]]\nresult = seen")
     assert out["result"] == [1, 2, 3], out["result"]
+
+
+# --- pure (analysis-only) transform + thread-local hardening ------------------
+
+# A foreach statement block: lowered via `_emit`'s block path (the body isn't a
+# top-level tuple), so it exercises the registration the bug report is about.
+_BLOCK_SRC = "range(4).foreach{\n    v = $\n    acc.append(v)\n}"
+
+
+def _analysis_tracers() -> list[pyc.BaseTracer]:
+    # An explicit stack so the transform behaves identically regardless of which
+    # thread calls it (mirrors how a consumer like DBLS resolves the live
+    # singletons), instead of depending on the ambient `_TRACER_STACK`.
+    return [
+        BraceBlockTracer.instance(),
+        PipelineTracer.instance(),
+        MacroTracer.instance(),
+        OptionalChainingTracer.instance(),
+    ]
+
+
+def test_pure_transform_of_block_leaves_state_unchanged():
+    from pipescript.tracers.macro_tracer import BLOCK_MARKER_FUNC
+
+    # Seed shared state as if a prior execution registered body #1.
+    BraceBlockTracer._counter = 1
+    BraceBlockTracer.block_sources.clear()
+    BraceBlockTracer._id_by_source.clear()
+    BraceBlockTracer.block_sources[1] = "<live body the kernel will read>"
+    BraceBlockTracer._id_by_source["<live body the kernel will read>"] = 1
+    before_counter = BraceBlockTracer._counter
+    before_sources = dict(BraceBlockTracer.block_sources)
+    before_ids = dict(BraceBlockTracer._id_by_source)
+
+    out = pyc.transform(_BLOCK_SRC, tracers=_analysis_tracers(), pure=True)
+
+    # lowered to a valid, lintable marker referencing the no-op block id 0...
+    assert isinstance(out, str)
+    assert f"{BLOCK_MARKER_FUNC}(0)" in out
+    # ...and the analysis left execution-relevant state byte-for-byte unchanged
+    assert BraceBlockTracer._counter == before_counter
+    assert dict(BraceBlockTracer.block_sources) == before_sources
+    assert dict(BraceBlockTracer._id_by_source) == before_ids
+    # the pure flag does not leak past the call
+    assert pyc.is_pure_transform() is False
+
+
+def test_default_transform_of_block_still_registers_body():
+    # Backward compatibility: a normal (non-pure) transform registers the body.
+    from pipescript.tracers.macro_tracer import BLOCK_MARKER_FUNC
+
+    BraceBlockTracer._counter = 0
+    BraceBlockTracer.block_sources.clear()
+    BraceBlockTracer._id_by_source.clear()
+
+    out = pyc.transform(_BLOCK_SRC, tracers=_analysis_tracers())  # pure defaults False
+
+    assert f"{BLOCK_MARKER_FUNC}(1)" in out
+    assert BraceBlockTracer._counter == 1
+    assert set(BraceBlockTracer.block_sources) == {1}
+
+
+def test_block_state_is_thread_local_under_concurrent_transform():
+    # Regression for the reported race: a lint-style transform on a background
+    # thread must not perturb the body the execution thread registered. Per-thread
+    # storage makes this hold even when the consumer forgets `pure=True`.
+    import threading
+
+    BraceBlockTracer._counter = 0
+    BraceBlockTracer.block_sources.clear()
+    BraceBlockTracer._id_by_source.clear()
+
+    ns = pyc.exec("acc = []\n" + _BLOCK_SRC + "\nresult = acc")
+    assert ns["result"] == [0, 1, 2, 3]
+    main_sources = dict(BraceBlockTracer.block_sources)
+    assert main_sources  # the execution thread registered a body
+
+    errors: list[BaseException] = []
+
+    def _lint() -> None:
+        try:
+            # a *different* document, transformed WITHOUT pure mode
+            other = "range(9).foreach{\n    w = $\n    sink.append(w * 2)\n}"
+            pyc.transform(other, tracers=_analysis_tracers())
+        except BaseException as exc:  # pragma: no cover - surfaced via assert
+            errors.append(exc)
+
+    t = threading.Thread(target=_lint)
+    t.start()
+    t.join()
+    assert not errors, errors
+
+    # the execution thread's registry is exactly as it left it...
+    assert dict(BraceBlockTracer.block_sources) == main_sources
+    # ...and re-executing the original block still resolves the right body
+    ns2 = pyc.exec("acc = []\n" + _BLOCK_SRC + "\nresult = acc")
+    assert ns2["result"] == [0, 1, 2, 3]
