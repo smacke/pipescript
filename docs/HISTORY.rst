@@ -1,7 +1,7 @@
 History
 =======
 
-0.0.23 (2026-06-26)
+0.0.24 (2026-06-27)
 -------------------
 * Integrate `|>` thunks and brace blocks with pyccolo transform/untransform;
 * Resugar multi-placeholder seed pipelines (`$ + $ |> ...`);

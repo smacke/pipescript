@@ -84,6 +84,22 @@ def test_namespace_block_macro_supports_nested_pipescript():
         __import__("builtins").__dict__.pop("ns", None)
 
 
+def test_namespace_block_macro_surfaces_block_exception():
+    from pipescript.tracers.macro_tracer import register_namespace_macro
+
+    register_namespace_macro("recordX", lambda ns: ns)
+    try:
+        # An exception raised by the block body must surface verbatim, not be
+        # swallowed into a None handler result (which downstream reads as e.g.
+        # `'NoneType' object does not support the context manager protocol`).
+        with pytest.raises(ZeroDivisionError):
+            pyc.eval("recordX{\n  a = 1\n  b = 1 / 0\n}")
+    finally:
+        MacroTracer.static_macros.pop("recordX", None)
+        MacroTracer.namespace_block_macros.pop("recordX", None)
+        __import__("builtins").__dict__.pop("recordX", None)
+
+
 def test_quick_lambda_statement_block_with_for_loop():
     # the motivating example: a multi-line lambda with a for-loop, $ = input
     assert (

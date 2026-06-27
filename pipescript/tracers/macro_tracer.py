@@ -516,6 +516,10 @@ class MacroTracer(pyc.BaseTracer):
         self.arg_replacer = ArgReplacer()
         self.lambda_cache: dict[tuple[int, int, TraceEvent], Any] = {}
         self._overridden_builtins: list[str] = []
+        # An exception raised by user code inside a namespace block, tagged so
+        # ``should_propagate_handler_exception`` lets it surface verbatim rather
+        # than being swallowed into a ``None`` handler result (see that method).
+        self.exc_to_propagate: Exception | None = None
         user_ns = get_user_ns()
         for macro_name, macro in (
             self.static_macros | self.dynamic_macros | self.dynamic_method_macros
@@ -533,6 +537,18 @@ class MacroTracer(pyc.BaseTracer):
                 delattr(builtins, macro_name)
         self._overridden_builtins.clear()
         super().reset()
+
+    def should_propagate_handler_exception(
+        self, _evt: TraceEvent, exc: Exception
+    ) -> bool:
+        # pyccolo defensively swallows handler exceptions (so an instrumentation
+        # bug can't break user code). A namespace block, however, runs user code:
+        # let an exception we tagged in ``_handle_namespace_block`` propagate so
+        # the user sees their real traceback, not a None context value.
+        if exc is self.exc_to_propagate:
+            self.exc_to_propagate = None
+            return True
+        return False
 
     class _IdentityAttributeSubscript:
         def __getitem__(self, item):
@@ -1019,8 +1035,15 @@ class MacroTracer(pyc.BaseTracer):
         except Exception:
             pass
         self._alias_block_linecache(frame, block_fn)
-        namespace = block_fn()  # runs the block; returns {name: value, ...}
-        return self.namespace_block_macros[func](namespace)
+        try:
+            namespace = block_fn()  # runs the block; returns {name: value, ...}
+            return self.namespace_block_macros[func](namespace)
+        except Exception as exc:
+            # The block body (and the macro builder) run user code; surface its
+            # exception verbatim instead of letting pyccolo swallow it into a
+            # None context value (-> cryptic 'NoneType is not a context manager').
+            self.exc_to_propagate = exc
+            raise
 
     @pyc.before_subscript_slice(when=is_static_macro, reentrant=True)
     def handle_macro(

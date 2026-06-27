@@ -33,7 +33,7 @@ from __future__ import annotations
 import ast
 import threading
 from collections.abc import MutableMapping
-from typing import Iterator, TypeVar
+from typing import Callable, Iterator, TypeVar
 
 import pyccolo as pyc
 from pyccolo.syntax_augmentation import (
@@ -99,7 +99,9 @@ class _BraceRewrite(pyc.CustomRewrite):
     hence a custom rewrite rather than a plain paired spec / ``body_func_wrapper``.
     """
 
-    def rewrite(self, code, register):
+    def rewrite(
+        self, code: str, register: Callable[[int, int], None]
+    ) -> tuple[str, list[tuple[int, int, int]]]:
         names = BraceBlockTracer._macro_names()
         if not names or "{" not in code:
             return code, []
@@ -139,7 +141,7 @@ class _BraceRewrite(pyc.CustomRewrite):
             register(anchor.line, anchor.col)
         return code, edits
 
-    def range_for(self, node):
+    def range_for(self, node: ast.AST) -> Range | None:
         # Anchor at the ``[`` (immediately after the macro name), mirroring
         # ``AstRewriter._get_subscript_range_for``. Only Subscript nodes whose
         # ``[`` offset was registered (i.e. brace-derived) actually bind the spec.
@@ -151,7 +153,14 @@ class _BraceRewrite(pyc.CustomRewrite):
             return None
         return Range.singleton_span(end_lineno, end_col)
 
-    def reverse(self, node, spec, aug_range, code, line_starts):
+    def reverse(
+        self,
+        node: ast.AST,
+        spec: pyc.AugmentationSpec,
+        aug_range: Range,
+        code: str,
+        line_starts: list[int],
+    ) -> tuple[int, int, str] | None:
         from pipescript.tracers.macro_tracer import block_marker_id
 
         if not isinstance(node, ast.Subscript):
