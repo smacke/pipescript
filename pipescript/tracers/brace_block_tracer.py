@@ -169,7 +169,12 @@ class _BraceRewrite(pyc.CustomRewrite):
         open_col = getattr(node.value, "end_col_offset", None)
         end_lineno = getattr(node, "end_lineno", None)
         end_col = getattr(node, "end_col_offset", None)
-        if None in (open_lineno, open_col, end_lineno, end_col):
+        if (
+            open_lineno is None
+            or open_col is None
+            or end_lineno is None
+            or end_col is None
+        ):
             return None
         open_off = offset_of(line_starts, open_lineno, open_col)
         end_off = offset_of(line_starts, end_lineno, end_col)
