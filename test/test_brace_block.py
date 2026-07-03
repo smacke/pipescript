@@ -511,3 +511,58 @@ def test_block_state_is_thread_local_under_concurrent_transform():
     # ...and re-executing the original block still resolves the right body
     ns2 = pyc.exec("acc = []\n" + _BLOCK_SRC + "\nresult = acc")
     assert ns2["result"] == [0, 1, 2, 3]
+
+
+# --- enclosing *function* scope: read and write-back (not just the exec/global
+# scope exercised above, where locals and globals coincide) ---
+
+
+def test_block_reads_enclosing_function_local_scalar():
+    # A block reading a scalar local of the enclosing *function* must resolve the
+    # local's value -- regression against a frame-walk that returned an unrelated
+    # machinery value (e.g. the foreach iterable) for a common name like `x`.
+    ns = pyc.exec(
+        "def run():\n"
+        "    x = 42\n"
+        "    out = []\n"
+        "    [7, 8].foreach{ out.append(x) }\n"
+        "    return out\n"
+    )
+    assert ns["run"]() == [42, 42]
+
+
+def test_block_rebinds_enclosing_function_local():
+    # Rebinding an enclosing function local inside a block writes back to that
+    # local, like inline code -- `total` accumulates across foreach iterations.
+    ns = pyc.exec(
+        "def run():\n"
+        "    total = 0\n"
+        "    [1, 2, 3].foreach{ total = total + $ }\n"
+        "    return total\n"
+    )
+    assert ns["run"]() == 6
+
+
+def test_block_new_name_stays_local_to_block():
+    # A name the block assigns that does *not* exist in any enclosing frame stays
+    # block-local and must not leak into the enclosing function.
+    ns = pyc.exec(
+        "def run():\n"
+        "    [1].foreach{ tmp = $ * 100 }\n"
+        "    return 'tmp' in dir()\n"
+    )
+    assert ns["run"]() is False
+
+
+def test_block_reads_local_shadowing_global():
+    # A function local that shares its name with a (different) global resolves to
+    # the local, matching normal Python scoping.
+    ns = pyc.exec(
+        "g = [999]\n"
+        "def run():\n"
+        "    g = []\n"
+        "    [1, 2].foreach{ g.append($) }\n"
+        "    return g\n"
+    )
+    assert ns["run"]() == [1, 2]
+    assert ns["g"] == [999]

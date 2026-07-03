@@ -14,12 +14,16 @@ from pipescript.analysis.extract_names import ExtractNames
 
 
 class FreeVarTransformer(ast.NodeTransformer):
-    frame_cache: dict[int, FrameType] = {}
+    """Rewrite each free-variable read in a synthesized lambda/block body to a
+    ``_dynamic_lookup("name")`` call, resolved at runtime against the live call
+    stack (see ``pipescript.api.utils._resolve_enclosing_frame``). ``frame`` is
+    accepted for API symmetry with the enclosing-scope analysis but is not needed
+    to resolve names -- resolution walks the stack that is live when the rewritten
+    code actually runs, so it survives arbitrary synthesized-lambda nesting and
+    holds no frame references."""
 
-    def __init__(self, freevars: set[str], frame: FrameType) -> None:
+    def __init__(self, freevars: set[str], frame: FrameType | None = None) -> None:
         self.freevars = freevars
-        self.frame_id = id(frame)
-        self.frame_cache[self.frame_id] = frame
 
     @fast.location_of_arg
     def visit_Name(self, node: ast.Name) -> ast.Name | ast.Call:
@@ -29,7 +33,7 @@ class FreeVarTransformer(ast.NodeTransformer):
 
         return fast.Call(
             func=fast.Name(_dynamic_lookup.__name__, ast.Load()),
-            args=[fast.Constant(value=node.id), fast.Constant(value=self.frame_id)],
+            args=[fast.Constant(value=node.id)],
             keywords=[],
         )
 
@@ -69,12 +73,26 @@ class SingletonArgCounterMixin:
             cls._arg_ctr += 1
         modified_lambda_body: ast.expr | None = None
         if frame.f_locals is not frame.f_globals:
+            # A free name that is a function local *not* also visible as a global
+            # goes through the ``_dynamic_lookup`` runtime accessor rather than a
+            # ``name=name`` default arg. Default-arg capture only binds correctly
+            # when the lambda is ``pyc.eval``'d directly; once a macro nests this
+            # lambda inside another synthesized lambda (e.g. a ``fork[...]`` branch
+            # re-embedded in an outer ``lambda: fork((...), _outer)``), the default
+            # is evaluated in the outer lambda's globals-only scope, where a pure
+            # local is invisible -- this is the bug that kept ``fork`` branches
+            # from seeing enclosing locals. ``_dynamic_lookup`` (an injected
+            # builtin resolving against the live call stack) is position
+            # independent, so it survives arbitrary nesting with no per-macro
+            # cooperation. Names that *are* visible as globals keep the default-arg
+            # path below: it resolves the local at (immediate) creation and the
+            # global when the lambda is created lazily -- which the live stack
+            # cannot do, since by then the defining frame may be gone (e.g.
+            # ``pyc.eval("$ |> fork[$ |> o.twice, ...]", {"o": obj})(5)``).
             freevars = {
                 arg
                 for arg in extra_defaults
-                if arg not in frame.f_globals
-                and arg not in frame.f_locals
-                and not hasattr(builtins, arg)
+                if arg not in frame.f_globals and not hasattr(builtins, arg)
                 # statement-block markers are resolved by MacroTracer when the
                 # consuming subscript macro is expanded, not by name lookup.
                 and not arg.startswith("__pyc_block_")
@@ -83,7 +101,14 @@ class SingletonArgCounterMixin:
                 modified_lambda_body = FreeVarTransformer(freevars, frame).visit(
                     lambda_body
                 )
-        extra_defaults = {arg for arg in extra_defaults if arg in frame.f_locals}
+        # Capture as default args only names that are both a local *and* a global
+        # (so the lazy-creation global fallback exists); pure locals are handled
+        # above via ``_dynamic_lookup``, pure globals resolve lexically.
+        extra_defaults = {
+            arg
+            for arg in extra_defaults
+            if arg in frame.f_locals and arg in frame.f_globals
+        }
         lambda_arg_str = ", ".join(
             itertools.chain(lambda_args, (f"{arg}={arg}" for arg in extra_defaults))
         )

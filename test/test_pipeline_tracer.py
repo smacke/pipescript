@@ -1184,3 +1184,36 @@ def test_thunk_rewrite_threads_positions():
     out, positions = t.transform(src, positions=[(1, src.index("5"))])
     line, col = positions[0]
     assert out.splitlines()[line - 1][col] == "5"
+
+
+def test_fork_branch_sees_enclosing_function_local():
+    # A `fork[...]` branch that references an enclosing *function* local (here the
+    # parameter `k`) must capture it. Previously only branch expressions failed --
+    # they resolved `$` and globals only, as if hoisted to module-level lambdas --
+    # while ordinary `|>` stages and the `*|>` combine stage captured locals fine.
+    ns = pyc.exec(
+        "def f(x, k):\n" "    return x |> fork[$, $ + k] *|> ($a, $b) *|> $a + $b\n"
+    )
+    assert ns["f"](1, 10) == 12  # x + (x + k) = 1 + 11
+    assert ns["f"](3, 5) == 11  # 3 + 8
+
+
+def test_fork_branch_local_and_global_still_distinct():
+    # A global referenced in a branch still resolves; a same-named local is not
+    # required for the global path to work.
+    ns = pyc.exec(
+        "K = 10\n"
+        "def f(x):\n"
+        "    return x |> fork[$, $ + K] *|> ($a, $b) *|> $a + $b\n"
+    )
+    assert ns["f"](1) == 12  # 1 + 11
+
+
+def test_fork_branch_parameterized_by_local_index_in_helper():
+    # The reported blocker: a fork branch inside a helper parameterized by a local
+    # index (`i`) -- previously `NameError: name 'i' is not defined`.
+    ns = pyc.exec(
+        "def block(x, i):\n" "    return x |> fork[$, $ + i] *|> ($a, $b) *|> $a + $b\n"
+    )
+    assert ns["block"](1, 10) == 12
+    assert ns["block"](2, 3) == 7  # 2 + 5

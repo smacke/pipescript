@@ -33,6 +33,7 @@ from pipescript.analysis.placeholders import (
 from pipescript.api.static_macros import fork, parallel
 from pipescript.api.utils import (
     _dynamic_lookup,
+    _dynamic_store,
     collapse,
     lshift,
     null,
@@ -782,6 +783,7 @@ class PipelineTracer(pyc.BaseTracer):
 
     extra_builtins = [
         _dynamic_lookup,
+        _dynamic_store,
         collapse,
         lshift,
         null,

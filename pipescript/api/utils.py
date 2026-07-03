@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import functools
+import sys
 from types import FrameType
 from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
-from pipescript.analysis.placeholders import FreeVarTransformer
+import pyccolo as pyc
+
 from pipescript.constants import pipeline_null
 
 T = TypeVar("T")
@@ -15,17 +16,58 @@ print_ = print
 
 
 if TYPE_CHECKING:
-    _dynamic_lookup: Callable[[str, int], Any]
+    _dynamic_lookup: Callable[[str], Any]
+    _dynamic_store: Callable[[str, Any], Any]
 else:
 
-    @functools.cache
-    def _dynamic_lookup(name: str, frame_id: int) -> Any:
-        frame: FrameType | None = FreeVarTransformer.frame_cache.get(frame_id)
-        while frame is not None and name not in frame.f_locals:
+    def _resolve_enclosing_frame(name: str) -> FrameType | None:
+        """Find the nearest enclosing *user* frame that binds ``name``.
+
+        Called only from pipescript-synthesized code (a placeholder/branch lambda
+        or a compiled block body) where ``name`` is a free variable of an
+        enclosing function scope. The walk starts one frame above the immediate
+        caller -- the synthesized frame itself is never the answer (the block's
+        own seeded locals live there), the enclosing binding is always further
+        out -- and skips the machinery frames pipescript/pyccolo mark with
+        ``__hide_pyccolo_frame__`` so an intermediate frame that happens to bind a
+        same-named local (e.g. the apply site's ``func``/``node`` params) can't
+        shadow the user's binding. pyccolo's bare binop/unaryop lambdas cannot
+        carry the marker, so their parameters are separately named to avoid
+        clashing with user locals.
+
+        Resolving against the live stack (rather than a frame captured at compile
+        time) keeps reads current across repeated block/branch invocations, needs
+        no frame retention, and -- crucially for write-back -- always targets a
+        live frame."""
+        # Depth 2 is the synthesized caller (0 = here, 1 = _dynamic_lookup/store);
+        # start one frame above it so the block's own seeded locals never match.
+        synthesized = sys._getframe(2)
+        frame: FrameType | None = synthesized.f_back
+        while frame is not None:
+            if (
+                "__hide_pyccolo_frame__" not in frame.f_locals
+                and name in frame.f_locals
+            ):
+                return frame
             frame = frame.f_back
+        return None
+
+    def _dynamic_lookup(name: str) -> Any:
+        frame = _resolve_enclosing_frame(name)
         if frame is None:
             raise NameError("Undefined name '%s'" % name)
         return frame.f_locals[name]
+
+    def _dynamic_store(name: str, value: Any) -> Any:
+        """Assign ``name = value`` back into the nearest enclosing frame that
+        owns ``name``, so a macro block body can rebind an enclosing function
+        local (e.g. ``total = total + $``). Returns ``value`` so the store can be
+        used as an expression."""
+        frame = _resolve_enclosing_frame(name)
+        if frame is None:
+            raise NameError("Undefined name '%s'" % name)
+        pyc.set_frame_local(frame, name, value)
+        return value
 
 
 def null(*_, **__) -> None:

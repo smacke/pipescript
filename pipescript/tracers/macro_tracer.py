@@ -514,7 +514,14 @@ class MacroTracer(pyc.BaseTracer):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.arg_replacer = ArgReplacer()
-        self.lambda_cache: dict[tuple[int, int, TraceEvent], Any] = {}
+        # (id(node), id(frame), evt) -> (frame, compiled thunk). The frame is kept
+        # only so a lookup can confirm identity: id(frame) is recycled once a frame
+        # is collected, and returning a *baked* macro thunk from a prior evaluation
+        # whose frame id was reused would skip re-execution. Retention is bounded
+        # by evicting entries whose frame has left the live call stack (see
+        # ``_lambda_cache_lookup``) -- without that, holding a frame would pin its
+        # locals, e.g. a whole training-step autograd graph, and leak per step.
+        self.lambda_cache: dict[tuple[int, int, TraceEvent], tuple[FrameType, Any]] = {}
         self._overridden_builtins: list[str] = []
         # An exception raised by user code inside a namespace block, tagged so
         # ``should_propagate_handler_exception`` lets it surface verbatim rather
@@ -536,7 +543,42 @@ class MacroTracer(pyc.BaseTracer):
             if hasattr(builtins, macro_name):
                 delattr(builtins, macro_name)
         self._overridden_builtins.clear()
+        self.lambda_cache.clear()
         super().reset()
+
+    def _lambda_cache_lookup(
+        self, node: ast.AST, frame: FrameType, evt: TraceEvent
+    ) -> Any:
+        """Return the cached thunk for ``(node, frame, evt)`` or ``_not_found``.
+
+        First evict every entry whose frame is no longer on ``frame``'s live call
+        stack: that keeps the cache from pinning a completed evaluation's frame
+        (and its locals) while still serving the *re-entrant* lookups within a
+        single evaluation, which share one live frame. The identity check guards
+        against ``id(frame)`` reuse handing back a prior frame's baked thunk."""
+        if self.lambda_cache:
+            live: set[FrameType] = set()
+            f: FrameType | None = frame
+            while f is not None:
+                live.add(f)
+                f = f.f_back
+            stale = [
+                key
+                for key, (cached_frame, _) in self.lambda_cache.items()
+                if cached_frame not in live
+            ]
+            for key in stale:
+                del self.lambda_cache[key]
+        entry = self.lambda_cache.get((id(node), id(frame), evt))
+        if entry is not None and entry[0] is frame:
+            return entry[1]
+        return self._not_found
+
+    def _lambda_cache_store(
+        self, node: ast.AST, frame: FrameType, evt: TraceEvent, thunk: Any
+    ) -> Any:
+        self.lambda_cache[(id(node), id(frame), evt)] = (frame, thunk)
+        return thunk
 
     def should_propagate_handler_exception(
         self, _evt: TraceEvent, exc: Exception
@@ -583,8 +625,7 @@ class MacroTracer(pyc.BaseTracer):
         *_,
         **__,
     ):
-        lambda_cache_key = (id(node), id(frame), evt)
-        cached_lambda = self.lambda_cache.get(lambda_cache_key, self._not_found)
+        cached_lambda = self._lambda_cache_lookup(node, frame, evt)
         if cached_lambda is not self._not_found:
             return cached_lambda
         __hide_pyccolo_frame__ = True
@@ -628,8 +669,7 @@ class MacroTracer(pyc.BaseTracer):
         else:
             evaluated_lambda = expanded_macro_expr
             ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731
-        self.lambda_cache[lambda_cache_key] = ret
-        return ret
+        return self._lambda_cache_store(node, frame, evt, ret)
 
     @pyc.before_subscript_load(when=is_static_macro, reentrant=True)
     def load_macro_result(self, *_, **__):
@@ -825,6 +865,58 @@ class MacroTracer(pyc.BaseTracer):
             and n not in frame.f_globals
         }
 
+    @staticmethod
+    def _name_in_enclosing_locals(frame: FrameType, name: str) -> bool:
+        """Whether ``name`` is bound as a *function* local in some enclosing
+        (non-machinery) frame. Machinery frames mark themselves with
+        ``__hide_pyccolo_frame__`` and are skipped, matching the runtime resolver
+        in ``pipescript.api.utils._resolve_enclosing_frame``; module frames
+        (``f_locals is f_globals``) are excluded so only genuine locals qualify."""
+        fr: FrameType | None = frame
+        while fr is not None:
+            if (
+                "__hide_pyccolo_frame__" not in fr.f_locals
+                and fr.f_locals is not fr.f_globals
+                and name in fr.f_locals
+            ):
+                return True
+            fr = fr.f_back
+        return False
+
+    def _block_enclosing_assigned(
+        self, body: list[ast.stmt], params: set[str], frame: FrameType
+    ) -> set[str]:
+        """Top-level names the block assigns that already exist as an enclosing
+        function local -- these get read-back-write-back semantics so the block
+        can rebind them (e.g. ``total = total + $``). Only *statement-level*
+        assignment targets are considered; names bound in nested scopes
+        (comprehensions, nested ``def``/``lambda``) stay local to those scopes."""
+        assigned: set[str] = set()
+
+        def add_target(tgt: ast.expr) -> None:
+            if isinstance(tgt, ast.Name):
+                assigned.add(tgt.id)
+            elif isinstance(tgt, (ast.Tuple, ast.List)):
+                for elt in tgt.elts:
+                    add_target(elt)
+            elif isinstance(tgt, ast.Starred):
+                add_target(tgt.value)
+
+        for stmt in body:
+            if isinstance(stmt, ast.Assign):
+                for tgt in stmt.targets:
+                    add_target(tgt)
+            elif isinstance(stmt, (ast.AugAssign, ast.AnnAssign)):
+                add_target(stmt.target)
+        return {
+            n
+            for n in assigned - params
+            if not hasattr(builtins, n)
+            and not n.startswith("__pyc_")
+            and n not in frame.f_globals
+            and self._name_in_enclosing_locals(frame, n)
+        }
+
     def _compile_block_function(
         self, block_src: str, frame: FrameType, namespace: bool = False
     ):
@@ -847,7 +939,7 @@ class MacroTracer(pyc.BaseTracer):
         # misattributing its own line number to the executing cell.
         __hide_pyccolo_frame__ = True  # noqa: F841
         from pipescript.analysis.placeholders import FreeVarTransformer
-        from pipescript.api.utils import _dynamic_lookup
+        from pipescript.api.utils import _dynamic_lookup, _dynamic_store
 
         block_src = normalize_block_src(block_src)
         # Substitute the block's own placeholders for parameters, leaving nested
@@ -857,6 +949,18 @@ class MacroTracer(pyc.BaseTracer):
         # Free-var analysis on a clean (uninstrumented) parse of the same source.
         clean_body = ast.parse(textwrap.dedent(self.transform(param_src)).strip("\n"))
         freevars = self._block_free_vars(clean_body.body, set(params), frame)
+        # Names the block *assigns* that already exist as an enclosing function
+        # local: rebinding one should write back to that local, mirroring inline
+        # code. A namespace block instead harvests its assignments into a dict, so
+        # it keeps its assignments block-local.
+        enclosing_assigned = (
+            set()
+            if namespace
+            else self._block_enclosing_assigned(clean_body.body, set(params), frame)
+        )
+        # A name resolved for write-back must not also be rewritten as a read-only
+        # free var (it is a real block local, seeded and flushed below).
+        freevars = freevars - enclosing_assigned
 
         # Parse the body as a *module* (at column 0) and wrap it in a FunctionDef
         # at the AST level. Wrapping in `def ...:` *textually* (with
@@ -899,9 +1003,28 @@ class MacroTracer(pyc.BaseTracer):
             )
         elif target_body and isinstance(target_body[-1], ast.Expr):
             target_body[-1] = ast.Return(value=target_body[-1].value)
+        if enclosing_assigned:
+            # Seed each write-back local from the enclosing frame at block entry
+            # and flush its final value back at block exit, so the block reads and
+            # rebinds the enclosing local exactly like inline code. A method macro
+            # such as ``foreach`` runs the block once per item, so the
+            # per-invocation seed observes the value left by the prior iteration --
+            # giving correct accumulation for ``total = total + $``.
+            seeds = [
+                ast.parse(f"{n} = _dynamic_lookup({n!r})").body[0]
+                for n in sorted(enclosing_assigned)
+            ]
+            flushes = [
+                ast.parse(f"_dynamic_store({n!r}, {n})").body[0]
+                for n in sorted(enclosing_assigned)
+            ]
+            if target_body and isinstance(target_body[-1], ast.Return):
+                target_body[-1:-1] = flushes
+            else:
+                target_body.extend(flushes)
+            target_body[0:0] = seeds
         if freevars:
-            transformer = FreeVarTransformer(freevars, frame)
-            body = [transformer.visit(stmt) for stmt in body]
+            body = [FreeVarTransformer(freevars, frame).visit(stmt) for stmt in body]
 
         fn_def = cast(
             ast.FunctionDef,
@@ -914,6 +1037,7 @@ class MacroTracer(pyc.BaseTracer):
 
         block_globals = dict(frame.f_globals)
         block_globals.setdefault("_dynamic_lookup", _dynamic_lookup)
+        block_globals.setdefault("_dynamic_store", _dynamic_store)
         local_ns: dict = {}
         fname = self.make_sandbox_fname()
         # Point tracebacks at the user's original block source instead of the
@@ -1049,8 +1173,7 @@ class MacroTracer(pyc.BaseTracer):
     def handle_macro(
         self, _ret, node: ast.Subscript, frame: FrameType, evt: TraceEvent, *_, **__
     ):
-        lambda_cache_key = (id(node), id(frame), evt)
-        cached_lambda = self.lambda_cache.get(lambda_cache_key, self._not_found)
+        cached_lambda = self._lambda_cache_lookup(node, frame, evt)
         if cached_lambda is not self._not_found:
             return cached_lambda
         __hide_pyccolo_frame__ = True
@@ -1068,13 +1191,11 @@ class MacroTracer(pyc.BaseTracer):
             evaluated_lambda = pyc.eval(callable_expr, frame.f_globals, frame.f_locals)
             self._alias_block_linecache(frame, evaluated_lambda)
             ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731
-            self.lambda_cache[lambda_cache_key] = ret
-            return ret
+            return self._lambda_cache_store(node, frame, evt, ret)
         if func in ("macro", "method"):
             macro = DynamicMacro.create(node.slice, self, is_method=func == "method")
             ret = lambda: __hide_pyccolo_frame__ and macro  # noqa: E731
-            self.lambda_cache[lambda_cache_key] = ret
-            return ret
+            return self._lambda_cache_store(node, frame, evt, ret)
         elif func in (fork.__name__, parallel.__name__) and isinstance(
             node.slice, ast.Tuple
         ):
@@ -1138,5 +1259,4 @@ class MacroTracer(pyc.BaseTracer):
         evaluated_lambda = pyc.eval(callable_expr, frame.f_globals, frame.f_locals)
         self._alias_block_linecache(frame, evaluated_lambda)
         ret = lambda: __hide_pyccolo_frame__ and evaluated_lambda  # noqa: E731
-        self.lambda_cache[lambda_cache_key] = ret
-        return ret
+        return self._lambda_cache_store(node, frame, evt, ret)
