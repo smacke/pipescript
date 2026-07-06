@@ -21,6 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history + tags so setuptools-git-versioning stamps the real
+          # version on the built wheel (a shallow clone has no tags and falls
+          # back to 0.0.1).
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"

@@ -40,11 +40,15 @@ python -m build --wheel "$ROOT" --outdir "$WHEELS"
 
 echo "==> Bundling pure-Python runtime deps offline (fast, robust load)"
 # pipescript's runtime closure: pyccolo -> traitlets, typing_extensions.
-# (traitlets/typing_extensions ship in the Pyodide env already; bundling them is
-# harmless insurance so the demo still loads if that ever changes.)
+# `comm` is NOT a pipescript dependency, but the Pyodide kernel's Jupyter stack
+# pulls it in, and micropip's environment-consistency resolution during
+# `%pip install pipescript` fails outright if `comm` can't be resolved from the
+# bundled index -- so bundle it (and its dep traitlets) too. traitlets/
+# typing_extensions ship in the Pyodide env already; bundling them is harmless
+# insurance so the demo still loads if that ever changes.
 python -m pip download --only-binary=:all: --python-version 3.12 \
   --implementation py --abi none --platform any \
-  pyccolo traitlets typing_extensions -d "$WHEELS"
+  pyccolo comm traitlets typing_extensions -d "$WHEELS"
 # keep only universal (pure-Python) wheels
 find "$WHEELS" -name '*.whl' ! -name '*-none-any.whl' -delete || true
 echo "  bundled $(ls "$WHEELS"/*.whl | wc -l | tr -d ' ') wheels into $(basename "$WHEELS")/"
