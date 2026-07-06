@@ -13,6 +13,7 @@ dist/
 !**/notebooks/*.ipynb
 **/[uU]ntitled*
 MANIFEST
+.jupyterlite.doit.db
 .coverage
 coverage.xml
 htmlcov/**

@@ -15,19 +15,28 @@ do_complete_patch_cls: type[IPythonKernel] = None  # type: ignore[assignment]
 get_completion_context_patch_cls: type[IPythonKernel] = None  # type: ignore[assignment]
 orig_do_complete = None
 orig_get_completion_context = None
+_did_patch_shell_completer = False
 
 
 def patch_kernel_completer(
     kernel: IPythonKernel, tracers: list[pyc.BaseTracer]
-) -> None:
+) -> bool:
     global do_complete_patch_cls
     global get_completion_context_patch_cls
     global orig_do_complete
     global orig_get_completion_context
 
-    for do_complete_patch_cls in kernel.__class__.mro():
-        if "do_complete" in do_complete_patch_cls.__dict__:
+    patch_cls = None
+    for cls in kernel.__class__.mro():
+        if "do_complete" in cls.__dict__:
+            patch_cls = cls
             break
+    if patch_cls is None:
+        # Some kernels (e.g. the JupyterLite/Pyodide `PyodideKernel`) expose no
+        # `do_complete` method to wrap; signal the caller to fall back to
+        # patching the shell completer instead.
+        return False
+    do_complete_patch_cls = patch_cls
     orig_do_complete = do_complete_patch_cls.do_complete
 
     @functools.wraps(do_complete_patch_cls.do_complete)
@@ -51,7 +60,7 @@ def patch_kernel_completer(
 
     # Databricks LSP support
     if not hasattr(kernel.__class__, "_get_completion_context"):
-        return
+        return True
     for get_completion_context_patch_cls in kernel.__class__.mro():
         if "_get_completion_context" in get_completion_context_patch_cls.__dict__:
             break
@@ -68,6 +77,7 @@ def patch_kernel_completer(
     get_completion_context_patch_cls._get_completion_context = (  # type: ignore[attr-defined]
         patched_get_completion_context
     )
+    return True
 
 
 def unpatch_kernel_completer() -> None:
@@ -113,14 +123,20 @@ def unpatch_shell_completer(completer: Completer) -> None:
 
 
 def patch_completer(shell: InteractiveShell, tracers: list[pyc.BaseTracer]) -> None:
-    if (kernel := getattr(shell, "kernel", None)) is None:
+    global _did_patch_shell_completer
+    kernel = getattr(shell, "kernel", None)
+    if kernel is None or not patch_kernel_completer(kernel, tracers):
         patch_shell_completer(shell.Completer, tracers)
+        _did_patch_shell_completer = True
     else:
-        patch_kernel_completer(kernel, tracers)
+        _did_patch_shell_completer = False
 
 
 def unpatch_completer(shell: InteractiveShell) -> None:
-    if getattr(shell, "kernel", None) is None:
+    # Mirror the branch taken in patch_completer: under a Pyodide kernel
+    # `shell.kernel` is set but we patch the shell completer, so we can't
+    # re-derive the branch from `shell.kernel` here.
+    if _did_patch_shell_completer:
         unpatch_shell_completer(shell.Completer)
     else:
         unpatch_kernel_completer()

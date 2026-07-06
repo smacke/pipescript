@@ -6,6 +6,7 @@ pipescript
 [![License: BSD3](https://img.shields.io/badge/License-BSD3-maroon.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![Python Versions](https://img.shields.io/pypi/pyversions/pipescript.svg)](https://pypi.org/project/pipescript)
 [![PyPI Version](https://img.shields.io/pypi/v/pipescript.svg)](https://pypi.org/project/pipescript)
+[![lite-badge](https://jupyterlite.rtfd.io/en/latest/_static/badge.svg)](https://smacke.github.io/pipescript/lab/index.html?path=demo.ipynb)
 
 Pipescript is an IPython extension that brings a pipe operator `|>` and
 powerful placeholder and macro expansion syntax extensions to IPython and Jupyter.
