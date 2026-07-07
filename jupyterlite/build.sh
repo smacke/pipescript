@@ -54,13 +54,7 @@ find "$WHEELS" -name '*.whl' ! -name '*-none-any.whl' -delete || true
 echo "  bundled $(ls "$WHEELS"/*.whl | wc -l | tr -d ' ') wheels into $(basename "$WHEELS")/"
 
 echo "==> Building the JupyterLite site"
-# Pin the JupyterLite kernel to the 0.6.x line, which ships Pyodide 0.27.6
-# (CPython 3.12). pyccolo's runtime instrumentation -- what makes pipescript's
-# `|>` actually behave as a pipe rather than a bitwise-or -- does not take
-# effect under the CPython 3.14 that newer pyodide-kernel releases bundle, so
-# the syntax silently degrades. Revisit once pyccolo supports 3.14.
-python -m pip install \
-  "jupyterlite-core==0.6.4" "jupyterlite-pyodide-kernel==0.6.1" jupyter_server
+python -m pip install jupyterlite-core jupyterlite-pyodide-kernel jupyter_server
 jupyter lite build --contents "$HERE/content" --lite-dir "$HERE" --output-dir "$DIST"
 
 echo "==> Done. Serve locally with:  python -m http.server -d '$DIST' 8000"

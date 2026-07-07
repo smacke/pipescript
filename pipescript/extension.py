@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import functools
-import inspect
 import os
 import re
 import sys
 from types import FrameType, TracebackType
-from typing import TYPE_CHECKING, Any, Callable, cast
+from typing import TYPE_CHECKING, Callable, cast
 
 import pyccolo as pyc
 from pyccolo.emit_event import SANDBOX_FNAME_PREFIX
@@ -52,22 +51,6 @@ def identify_dynamic_macros(*_, **__) -> None:
             MacroTracer.dynamic_macros[k] = v
 
 
-def make_ipython_name(
-    shell: InteractiveShell,
-    info: ExecutionInfo,
-) -> str:
-    cache = shell.compile.cache
-    kwargs: dict[str, Any] = {}
-    if "raw_code" in inspect.signature(cache).parameters:
-        kwargs["raw_code"] = info.raw_cell
-    transformed_cell = getattr(info, "transformed_cell", None)
-    return cache(
-        transformed_cell or shell.transform_cell(info.raw_cell),
-        shell.execution_count,
-        **kwargs,
-    )
-
-
 def make_tracing_contexts(
     shell: InteractiveShell, tracers: list[pyc.BaseTracer]
 ) -> tuple[Callable[..., None], Callable[..., None]]:
@@ -84,15 +67,31 @@ def make_tracing_contexts(
         shell.input_transformers_post.append(tracer.make_syntax_augmenter(rewriter))
     shell.ast_transformers.append(rewriter)
 
+    # Bind the rewriter to the *exact* filename IPython assigns each cell, by
+    # wrapping the caching compiler that mints it. IPython calls this right
+    # before it runs the AST transformers and compiles the cell, so the name is
+    # authoritative. Predicting it from ``shell.execution_count`` (as we used to)
+    # breaks on IPython >= 9, which bumps ``execution_count`` at a different
+    # point than IPython 8 -- yielding an off-by-one cell name so the rewriter
+    # treated user cells as untraced and emitted uninstrumented code (``|>``
+    # silently degraded to a bitwise-or).
+    orig_cache = shell.compile.cache
+
+    @functools.wraps(orig_cache)
+    def _caching_compiler_cache(transformed_code, number=0, *args, **kwargs) -> str:
+        cell_name = orig_cache(transformed_code, number, *args, **kwargs)
+        rewriter._path = cell_name
+        rewriter._module_id = number
+        for tracer in tracers:
+            tracer._tracing_enabled_files.add(cell_name)
+        return cell_name
+
+    shell.compile.cache = _caching_compiler_cache  # type: ignore[method-assign]
+
     def _enter_tracer_context_callback(info: ExecutionInfo, *_, **__) -> None:
         for tracer in tracers:
             tracer.reset()
             tracer.__enter__()
-        cell_name = make_ipython_name(shell, info)
-        rewriter._path = cell_name
-        rewriter._module_id = shell.execution_count
-        for tracer in tracers:
-            tracer._tracing_enabled_files.add(cell_name)
 
     def _exit_tracer_context_callback(*_, **__) -> None:
         nonlocal inited
