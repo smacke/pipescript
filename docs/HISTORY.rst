@@ -1,6 +1,10 @@
 History
 =======
 
+0.0.26 (2026-07-07)
+-------------------
+* Fixes for IPython 9 and JupyterLite;
+
 0.0.25 (2026-07-03)
 -------------------
 * Integrate `|>` thunks and brace blocks with pyccolo transform/untransform;
