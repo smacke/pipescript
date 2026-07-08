@@ -2,14 +2,16 @@ pipescript
 ==========
 
 [![CI Status](https://github.com/smacke/pipescript/workflows/pipescript/badge.svg)](https://github.com/smacke/pipescript/actions)
+[![lite-badge](https://jupyterlite.rtfd.io/en/latest/_static/badge.svg)](https://smacke.github.io/pipescript/lab/index.html?path=demo.ipynb)
 [![Checked with mypy](http://www.mypy-lang.org/static/mypy_badge.svg)](http://mypy-lang.org/)
 [![License: BSD3](https://img.shields.io/badge/License-BSD3-maroon.svg)](https://opensource.org/licenses/BSD-3-Clause)
-[![Python Versions](https://img.shields.io/pypi/pyversions/pipescript.svg)](https://pypi.org/project/pipescript)
 [![PyPI Version](https://img.shields.io/pypi/v/pipescript.svg)](https://pypi.org/project/pipescript)
-[![lite-badge](https://jupyterlite.rtfd.io/en/latest/_static/badge.svg)](https://smacke.github.io/pipescript/lab/index.html?path=demo.ipynb)
+[![Python Versions](https://img.shields.io/pypi/pyversions/pipescript.svg)](https://pypi.org/project/pipescript)
 
 Pipescript is an IPython extension that brings a pipe operator `|>` and
 powerful placeholder and macro expansion syntax extensions to IPython and Jupyter.
+
+## ✨ [Go here](https://smacke.github.io/pipescript/lab/index.html?path=demo.ipynb) to try it in your browser ✨
 
 For a quick example, consider the following code snippet, which is not super easy
 to read (which function call does the keyword parameter `initial=1.0` go with?):
