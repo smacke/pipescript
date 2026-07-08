@@ -54,8 +54,9 @@ xmlcov: check_no_typing
 
 check_ci: typecheck xmlcov
 
-deps:
-	pip install -r requirements.txt
+# `deps` is an alias for `devdeps`; there is no requirements.txt -- dependencies
+# are declared as extras in setup.cfg.
+deps: devdeps
 
 devdeps:
 	pip install -e .[dev]

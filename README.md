@@ -3,6 +3,7 @@ pipescript
 
 [![CI Status](https://github.com/smacke/pipescript/workflows/pipescript/badge.svg)](https://github.com/smacke/pipescript/actions)
 [![lite-badge](https://jupyterlite.rtfd.io/en/latest/_static/badge.svg)](https://smacke.github.io/pipescript/lab/index.html?path=demo.ipynb)
+[![Documentation Status](https://readthedocs.org/projects/pipescript/badge/?version=latest)](https://pipescript.readthedocs.io/en/latest/?badge=latest)
 [![Checked with mypy](http://www.mypy-lang.org/static/mypy_badge.svg)](http://mypy-lang.org/)
 [![License: BSD3](https://img.shields.io/badge/License-BSD3-maroon.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![PyPI Version](https://img.shields.io/pypi/v/pipescript.svg)](https://pypi.org/project/pipescript)
