@@ -4,25 +4,20 @@ import functools
 import os
 import re
 import sys
-from types import FrameType, TracebackType
+from types import TracebackType
 from typing import TYPE_CHECKING, Callable, cast
 
 import pyccolo as pyc
-from pyccolo.emit_event import SANDBOX_FNAME_PREFIX
-from pyccolo.tracer import (
-    HIDE_PYCCOLO_FRAME,
-    PYCCOLO_DEV_MODE_ENV_VAR,
-    TRACED_LAMBDA_NAME,
-)
+from pyccolo.tracer import PYCCOLO_DEV_MODE_ENV_VAR
 
-from pipescript.patches.completion_patch import patch_completer
+from pipescript.patches.completion_patch import patch_completer, unpatch_completer
 from pipescript.tracers.brace_block_tracer import BraceBlockTracer
 from pipescript.tracers.macro_tracer import DynamicMacro, MacroTracer
 from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
 from pipescript.tracers.pipeline_tracer import PipelineTracer
 
 if TYPE_CHECKING:
-    from IPython.core.interactiveshell import ExecutionInfo, InteractiveShell
+    from IPython.core.interactiveshell import InteractiveShell
 
 
 def clear_tracer_stacks(*_, **__) -> None:
@@ -51,87 +46,31 @@ def identify_dynamic_macros(*_, **__) -> None:
             MacroTracer.dynamic_macros[k] = v
 
 
-def make_tracing_contexts(
-    shell: InteractiveShell, tracers: list[pyc.BaseTracer]
-) -> tuple[Callable[..., None], Callable[..., None]]:
-    inited = False
-    rewriter = tracers[-1].ast_rewriter_cls(tracers, "")
-
-    def _cleanup_transformer(lines) -> None:
-        rewriter.__init__(tracers, "")  # type: ignore[misc]
-        return lines
-
-    shell.input_transformers_cleanup.insert(0, _cleanup_transformer)
-
-    for tracer in tracers:
-        shell.input_transformers_post.append(tracer.make_syntax_augmenter(rewriter))
-    shell.ast_transformers.append(rewriter)
-
-    # Bind the rewriter to the *exact* filename IPython assigns each cell, by
-    # wrapping the caching compiler that mints it. IPython calls this right
-    # before it runs the AST transformers and compiles the cell, so the name is
-    # authoritative. Predicting it from ``shell.execution_count`` (as we used to)
-    # breaks on IPython >= 9, which bumps ``execution_count`` at a different
-    # point than IPython 8 -- yielding an off-by-one cell name so the rewriter
-    # treated user cells as untraced and emitted uninstrumented code (``|>``
-    # silently degraded to a bitwise-or).
-    orig_cache = shell.compile.cache
-
-    @functools.wraps(orig_cache)
-    def _caching_compiler_cache(transformed_code, number=0, *args, **kwargs) -> str:
-        cell_name = orig_cache(transformed_code, number, *args, **kwargs)
-        rewriter._path = cell_name
-        rewriter._module_id = number
-        for tracer in tracers:
-            tracer._tracing_enabled_files.add(cell_name)
-        return cell_name
-
-    shell.compile.cache = _caching_compiler_cache  # type: ignore[method-assign]
-
-    def _enter_tracer_context_callback(info: ExecutionInfo, *_, **__) -> None:
-        for tracer in tracers:
-            tracer.reset()
-            tracer.__enter__()
-
-    def _exit_tracer_context_callback(*_, **__) -> None:
-        nonlocal inited
-        was_inited = inited
-        inited = True
-        if not was_inited:
-            return
-        for tracer in reversed(tracers):
-            tracer.__exit__(None, None, None)
-
-    return _enter_tracer_context_callback, _exit_tracer_context_callback
+# pipescript's tracers, in the order their syntax augmenters must run.
+# ``BraceBlockTracer`` is first so `macro{ ... }` brace extraction happens before
+# the `$` -> `_` placeholder pass. pyccolo registers in this order and keeps it,
+# whether the host is plain IPython or ipyflow.
+PIPESCRIPT_TRACERS: list[type[pyc.BaseTracer]] = [
+    BraceBlockTracer,
+    PipelineTracer,
+    MacroTracer,
+    OptionalChainingTracer,
+]
 
 
-def filter_hidden_frames(tb: TracebackType | None) -> None:
-    prev = None
-    while tb is not None:
-        should_filter = False
-        frame: FrameType = tb.tb_frame
-        if prev is not None:
-            fname = frame.f_code.co_filename
-            # A sandbox frame marked traceback-visible (a compiled pipescript
-            # block, or a macro sub-lambda like a `fork` branch) is
-            # user-meaningful and pinpoints the failing stage -- keep it instead
-            # of filtering it as a synthetic sandbox frame.
-            should_filter = frame.f_locals.get(HIDE_PYCCOLO_FRAME, False)
-            should_filter = should_filter or (
-                fname.startswith(SANDBOX_FNAME_PREFIX)
-                and not pyc.is_traceback_visible(fname)
-            )
-            should_filter = should_filter or frame.f_code.co_name in (
-                TRACED_LAMBDA_NAME,
-                "_patched_eval",
-                "_patched_tracer_eval",
-            )
-            should_filter = should_filter or "pyccolo" in fname
-        if should_filter and prev is not None:
-            prev.tb_next = tb.tb_next
-        else:
-            prev = tb
-        tb = tb.tb_next
+def register_tracers(shell: InteractiveShell) -> list[pyc.BaseTracer]:
+    for tracer_cls in PIPESCRIPT_TRACERS:
+        pyc.register_ipython_tracer(tracer_cls, shell=shell)
+    return [cast(pyc.BaseTracer, cls).instance() for cls in PIPESCRIPT_TRACERS]
+
+
+def deregister_tracers(shell: InteractiveShell) -> None:
+    for tracer_cls in reversed(PIPESCRIPT_TRACERS):
+        pyc.deregister_ipython_tracer(tracer_cls, shell=shell)
+
+
+# pyccolo owns the frame filter now; both hosts share the one implementation.
+filter_hidden_frames = pyc.filter_hidden_frames
 
 
 _BLOCK_MARKER_RE = re.compile(r"\[__pyc_block__\(\d+\)\]")
@@ -199,21 +138,22 @@ def load_builtin_dynamic_macros(
         run_cell(f"{macro_name} = {macro_def}")
 
 
-def load_ipython_extension(shell: InteractiveShell) -> None:
-    tracers = [
-        cast(pyc.BaseTracer, cls).instance()
-        # BraceBlockTracer must be outermost so `macro{ ... }` brace extraction
-        # runs before the `$` -> `_` placeholder pass.
-        for cls in [
-            BraceBlockTracer,
-            PipelineTracer,
-            MacroTracer,
-            OptionalChainingTracer,
-        ]
-    ]
-    enter_context, exit_context = make_tracing_contexts(shell, tracers)
-    shell.events.register("pre_run_cell", enter_context)
-    shell.events.register("post_run_cell", exit_context)
+def load_ipython_extension(
+    shell: InteractiveShell,
+    run_cell: Callable[[str], object] | None = None,
+) -> None:
+    """Install pipescript's tracers on whatever host owns the cell lifecycle.
+
+    pyccolo's IPython extension owns the AST/input transformers, the cell
+    filename, and the per-cell tracing context -- and it already knows whether
+    ipyflow is driving. So there is one code path here, not two.
+    """
+    # pyccolo's extension owns the cell tracing driver; loading it through the
+    # extension manager (rather than calling ``load_ipython_extension`` directly)
+    # keeps a later ``%unload_ext pyccolo`` working.
+    assert shell.extension_manager is not None
+    shell.extension_manager.load_extension("pyccolo")
+    tracers = register_tracers(shell)
     shell.events.register("post_run_cell", clear_tracer_stacks)
     shell.events.register("post_run_cell", identify_dynamic_macros)
     # monkey patch instead of using set_custom_exc so that
@@ -222,9 +162,26 @@ def load_ipython_extension(shell: InteractiveShell) -> None:
         shell.__class__.showtraceback
     )
     patch_completer(shell, tracers)
-    load_builtin_dynamic_macros(shell)
+
+    if run_cell is None:
+        load_builtin_dynamic_macros(shell)
+        return
+
+    # A caller-supplied ``run_cell`` (ipyflow's test harness) needs the macro
+    # definitions deferred until after the first cell, so the just-registered
+    # tracers are live when the definitions are evaluated.
+    def _load_builtin_dynamic_macros_once(*_args, **_kwargs) -> None:
+        shell.events.unregister("post_run_cell", _load_builtin_dynamic_macros_once)
+        load_builtin_dynamic_macros(shell, run_cell=run_cell)
+
+    shell.events.register("post_run_cell", _load_builtin_dynamic_macros_once)
 
 
-def unload_ipython_extension(_shell: InteractiveShell) -> None:
-    # TODO: implement this
-    pass
+def unload_ipython_extension(shell: InteractiveShell) -> None:
+    unpatch_completer(shell.Completer)
+    for handler in (identify_dynamic_macros, clear_tracer_stacks):
+        try:
+            shell.events.unregister("post_run_cell", handler)
+        except ValueError:
+            pass
+    deregister_tracers(shell)

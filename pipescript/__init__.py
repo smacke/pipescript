@@ -5,14 +5,12 @@ Just run `%load_ext pipescript` to begin using pipe operators, placeholders, and
 
 from __future__ import annotations
 
-import sys
-from typing import TYPE_CHECKING, Callable, cast
-
-import pyccolo as pyc
+from typing import TYPE_CHECKING, Callable
 
 import pipescript.api
 from pipescript.api import *  # noqa: F403
-from pipescript.extension import (
+from pipescript.extension import (  # noqa: F401
+    PIPESCRIPT_TRACERS,
     clear_tracer_stacks,
     identify_dynamic_macros,
     load_builtin_dynamic_macros,
@@ -21,11 +19,12 @@ from pipescript.extension import load_ipython_extension as load_ipython_extensio
 from pipescript.extension import (
     unload_ipython_extension as unload_ipython_extension_base,
 )
-from pipescript.patches.completion_patch import patch_completer, unpatch_completer
-from pipescript.tracers.brace_block_tracer import BraceBlockTracer
-from pipescript.tracers.macro_tracer import MacroTracer
-from pipescript.tracers.optional_chaining_tracer import OptionalChainingTracer
-from pipescript.tracers.pipeline_tracer import PipelineTracer
+from pipescript.tracers.brace_block_tracer import BraceBlockTracer  # noqa: F401
+from pipescript.tracers.macro_tracer import MacroTracer  # noqa: F401
+from pipescript.tracers.optional_chaining_tracer import (  # noqa: F401
+    OptionalChainingTracer,
+)
+from pipescript.tracers.pipeline_tracer import PipelineTracer  # noqa: F401
 
 from . import _version  # noqa: E402
 
@@ -35,98 +34,21 @@ if TYPE_CHECKING:
     from IPython.core.interactiveshell import InteractiveShell
 
 
-def load_ipython_extension_ipyflow(
+def load_ipython_extension(
     shell: InteractiveShell,
     run_cell: Callable[[str], object] | None = None,
 ) -> None:
-    from ipyflow.shell.interactiveshell import IPyflowInteractiveShell
-
-    assert isinstance(shell, IPyflowInteractiveShell)
-    shell.run_line_magic(
-        "flow", f"register {PipelineTracer.__module__}.{PipelineTracer.__name__}"
-    )
-    shell.run_line_magic(
-        "flow",
-        f"register {MacroTracer.__module__}.{MacroTracer.__name__}",
-    )
-    shell.run_line_magic(
-        "flow",
-        f"register {OptionalChainingTracer.__module__}.{OptionalChainingTracer.__name__}",
-    )
-    # Register BraceBlockTracer LAST: ipyflow applies syntax augmenters in
-    # reverse registration order, so this makes brace extraction run *first*
-    # (outermost) -- before the `$` -> `_` placeholder pass.
-    shell.run_line_magic(
-        "flow", f"register {BraceBlockTracer.__module__}.{BraceBlockTracer.__name__}"
-    )
-    shell.events.register("post_run_cell", clear_tracer_stacks)
-    shell.events.register("post_run_cell", identify_dynamic_macros)
-    # Wrap ipyflow's own ``showtraceback`` so pipescript's traceback enrichment
-    # (re-sugar ``__pyc_block__`` markers, attach diagnostic notes, render them on
-    # <3.11) also runs under ipyflow -- its sandbox-frame filter already keeps the
-    # block frames visible via the shared pyccolo registry.
-    from pipescript.extension import make_patched_showtraceback
-
-    shell.__class__.showtraceback = make_patched_showtraceback(  # type: ignore[method-assign]
-        shell.__class__.showtraceback
-    )
-    tracers = [
-        cast(pyc.BaseTracer, cls).instance()
-        for cls in [
-            BraceBlockTracer,
-            PipelineTracer,
-            MacroTracer,
-            OptionalChainingTracer,
-        ]
-    ]
-    patch_completer(shell, tracers=tracers)
-
-    def _load_builtin_dynamic_macros_once(*_args, **_kwargs) -> None:
-        shell.events.unregister("post_run_cell", _load_builtin_dynamic_macros_once)
-        load_builtin_dynamic_macros(shell, run_cell=run_cell)
-
-    shell.events.register("post_run_cell", _load_builtin_dynamic_macros_once)
-
-
-def unload_ipython_extension_ipyflow(shell: InteractiveShell) -> None:
-    unpatch_completer(shell.Completer)
-    shell.events.unregister("post_run_cell", identify_dynamic_macros)
-    shell.events.unregister("post_run_cell", clear_tracer_stacks)
-    shell.run_line_magic(
-        "flow",
-        f"deregister {OptionalChainingTracer.__module__}.{OptionalChainingTracer.__name__}",
-    )
-    shell.run_line_magic(
-        "flow",
-        f"deregister {MacroTracer.__module__}.{MacroTracer.__name__}",
-    )
-    shell.run_line_magic(
-        "flow", f"deregister {PipelineTracer.__module__}.{PipelineTracer.__name__}"
-    )
-
-
-def load_ipython_extension(shell: InteractiveShell) -> None:
-    IPyflowInteractiveShell = getattr(
-        sys.modules.get("ipyflow.shell.interactiveshell"),
-        "IPyflowInteractiveShell",
-        type(None),
-    )
-    if isinstance(shell, IPyflowInteractiveShell):
-        load_ipython_extension_ipyflow(shell)
-    else:
-        load_ipython_extension_base(shell)
+    load_ipython_extension_base(shell, run_cell=run_cell)
 
 
 def unload_ipython_extension(shell: InteractiveShell) -> None:
-    IPyflowInteractiveShell = getattr(
-        sys.modules.get("ipyflow.shell.interactiveshell"),
-        "IPyflowInteractiveShell",
-        type(None),
-    )
-    if isinstance(shell, IPyflowInteractiveShell):
-        unload_ipython_extension_ipyflow(shell)
-    else:
-        unload_ipython_extension_base(shell)
+    unload_ipython_extension_base(shell)
+
+
+# Back-compat aliases. Host detection now lives in pyccolo's IPython extension,
+# so both hosts take the same path and these are no longer distinct.
+load_ipython_extension_ipyflow = load_ipython_extension
+unload_ipython_extension_ipyflow = unload_ipython_extension
 
 
 __all__ = list(pipescript.api.__all__)
