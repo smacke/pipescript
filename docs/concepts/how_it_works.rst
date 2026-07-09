@@ -49,7 +49,10 @@ pipescript source:
 - Standard and third-party libraries work unchanged -- it is all just function
   calls underneath.
 - Jupyter ergonomics like readable tracebacks and jedi-based autocomplete keep
-  working, for the most part.
+  working, for the most part. Completion is additionally *type aware*: the
+  pipeline under the cursor is desugared into the nested calls it denotes before
+  jedi sees it, so ``["a", "b"] |> "\n".join($) |> $.`` completes ``str``
+  methods without the pipeline prefix having been executed.
 - There is a run-time cost when pipescript syntax is actually used, but **none**
   for vanilla Python, even with the extension loaded. See :doc:`performance`.
 

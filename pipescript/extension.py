@@ -178,7 +178,7 @@ def load_ipython_extension(
 
 
 def unload_ipython_extension(shell: InteractiveShell) -> None:
-    unpatch_completer(shell.Completer)
+    unpatch_completer(shell)
     for handler in (identify_dynamic_macros, clear_tracer_stacks):
         try:
             shell.events.unregister("post_run_cell", handler)

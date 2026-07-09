@@ -800,7 +800,11 @@ an instrumented fashion using pyccolo. Because everything is just running in
 Python, pipescript is effectively a Python superset, and because the transformed
 Python that is instrumented is fairly similar visually to pipescript syntax,
 various Jupyter ergonomical features like readable stack traces and jedi-based
-autocomplete can continue to function as normal (for the most part).
+autocomplete can continue to function as normal (for the most part). Completion
+goes a step further: before handing the cell to jedi, pipescript desugars the
+pipeline under the cursor into the nested calls it denotes, so that
+`["a", "b"] |> "\n".join($) |> $.<TAB>` offers `str` methods without the prefix
+of the pipeline ever having been run.
 
 Implementation-wise, thanks to pyccolo's heavy lifting, I was able to write the
 initial release of pipescript entirely over the course of time off during the
