@@ -115,11 +115,12 @@ def patch_kernel_completer(
 
     @functools.wraps(get_completion_context_patch_cls._get_completion_context)  # type: ignore[attr-defined]
     def patched_get_completion_context(self, *args, **kwargs) -> str:
-        return pyc.transform(
-            orig_get_completion_context(self, *args, **kwargs),
-            tracers=tracers,
-            pure=True,
-        )
+        context = orig_get_completion_context(self, *args, **kwargs)
+        # Context is prior source, not the line being typed, so every chain in it is
+        # complete and lowers to a value -- which is what gives the LSP a type for a
+        # name a previous cell bound with a pipeline.
+        lowered = lower_pipelines(context, cursor_at_end=False)
+        return pyc.transform(lowered or context, tracers=tracers, pure=True)
 
     get_completion_context_patch_cls._get_completion_context = (  # type: ignore[attr-defined]
         patched_get_completion_context

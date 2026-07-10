@@ -801,10 +801,20 @@ Python, pipescript is effectively a Python superset, and because the transformed
 Python that is instrumented is fairly similar visually to pipescript syntax,
 various Jupyter ergonomical features like readable stack traces and jedi-based
 autocomplete can continue to function as normal (for the most part). Completion
-goes a step further: before handing the cell to jedi, pipescript desugars the
-pipeline under the cursor into the nested calls it denotes, so that
+goes a step further: before handing the cell to jedi, pipescript desugars each
+pipeline into the nested calls it denotes, so that
 `["a", "b"] |> "\n".join($) |> $.<TAB>` offers `str` methods without the prefix
-of the pipeline ever having been run.
+of the pipeline ever having been run. Because every complete chain in the cell is
+lowered, not just the one under the cursor, a name a pipeline binds is typed
+wherever it is later used:
+
+```python
+result = ["a", "b"] |> "\n".join($)
+result.<TAB>    # -> upper, splitlines, ...
+
+[1, 2, 3] |>> nums |> sum
+nums.<TAB>      # -> append, count, ...
+```
 
 Implementation-wise, thanks to pyccolo's heavy lifting, I was able to write the
 initial release of pipescript entirely over the course of time off during the

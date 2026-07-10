@@ -113,8 +113,9 @@ LOWERINGS = [
     ("[[1], [2]] *|> zip |> list |> $.", "((list)(((zip)(*([[1], [2]])))))."),
     # `<|` applies the accumulated function to the stage
     ('f <| ["a"] |> $.', '(((f))(["a"])).'),
-    # `|>>` binds a name and passes its LHS through untouched
-    ("xs |>> ys |> $.", "(xs)."),
+    # `|>>` binds a name and passes its LHS through untouched -- exactly a walrus,
+    # which also lets the bound name be typed downstream
+    ("xs |>> ys |> $.", "(ys := (xs))."),
     # the cursor may sit *deeper* than the chain it belongs to
     ("foo |> bar($, baz.", "bar((foo), baz."),
     # `|` binds tighter than `==`, so the chain starts after it
@@ -131,6 +132,63 @@ LOWERINGS = [
 @pytest.mark.parametrize("code,expected", LOWERINGS)
 def test_lower_pipelines(code: str, expected: str) -> None:
     assert lower_pipelines(code) == expected
+
+
+# Chains that do not touch the cursor are complete expressions, so they lower to
+# values -- which is what lets a name a pipeline bound get typed further down.
+WHOLE_CELL_LOWERINGS = [
+    (
+        'result = ["a"] |> "\\n".join($)\nresult.up',
+        'result = "\\n".join((["a"]))\nresult.up',
+    ),
+    (
+        "xs = [1, 2] |> sorted\nys = xs |> len\nys.bit_",
+        "xs = (sorted)(([1, 2]))\nys = (len)((xs))\nys.bit_",
+    ),
+    # `|>>` binds its name, so the walrus makes it visible downstream too
+    ("[1, 2] |>> nums |> sum\nnums.", "(sum)((nums := ([1, 2])))\nnums."),
+    # a chain nested inside a seed is lowered first, which is what unblocks the
+    # chain enclosing it
+    ('(["a"] |> len) |> $.', '(((len)((["a"])))).'),
+    ("f([1, 2] |> sum) |> $.", "(f((sum)(([1, 2]))))."),
+    # a complete chain elsewhere on the cursor's line
+    ("f(xs |> g, ba", "f((g)((xs)), ba"),
+]
+
+
+@pytest.mark.parametrize("code,expected", WHOLE_CELL_LOWERINGS)
+def test_lower_pipelines_whole_cell(code: str, expected: str) -> None:
+    assert lower_pipelines(code) == expected
+
+
+def test_lower_pipelines_is_linear_in_cell_size() -> None:
+    """Foldable chains never nest, so a round lowers all of them in one sweep.
+    Re-scanning per chain instead would make each keystroke quadratic in a cell's
+    chain count -- 400 chains took over a second before this was batched."""
+    import time
+
+    def elapsed(n_chains: int) -> float:
+        code = (
+            "\n".join(f"v{i} = [1, 2] |> sorted |> $[0]" for i in range(n_chains))
+            + "\nv0.bit_"
+        )
+        lower_pipelines(code)  # warm any lazily-built tables
+        start = time.perf_counter()
+        lower_pipelines(code)
+        return time.perf_counter() - start
+
+    small, large = elapsed(20), elapsed(320)
+    # 16x the chains; linear would be ~16x the time. Allow generous slack for a
+    # noisy CI box, but not the ~256x that a per-chain rescan would cost.
+    assert large < small * 60, (small, large)
+
+
+def test_lower_pipelines_without_cursor() -> None:
+    """Source with no cursor in it (e.g. an LSP's context lines) has no partially
+    typed final stage, so a chain running to its end lowers like any other."""
+    assert lower_pipelines("x |> f", cursor_at_end=False) == "(f)((x))"
+    # ...whereas with a cursor at the end, that same chain is mid-edit
+    assert lower_pipelines("x |> f") is None
 
 
 BAILS = [
@@ -250,6 +308,11 @@ def _complete(shell, text: str) -> tuple[list[str], tuple[int, int]]:
         ("[1, 2] |> sum |> $.bit_", "bit_length"),
         ('{"a": 1} **|> dict |> $.ke', "keys"),
         ('d = {"a": 1} |> $.items() |> list |> $[0].c', "count"),
+        # a name bound by a pipeline on an earlier line
+        ('result = ["a", "b"] |> "\\n".join($)\nresult.up', "upper"),
+        ("xs = [3, 1] |> sorted\nys = xs |> len\nys.bit_", "bit_length"),
+        # ...including one bound by `|>>`
+        ("[1, 2] |>> nums |> sum\nnums.co", "count"),
     ],
 )
 def test_completes_without_running_the_prefix(code: str, expected: str) -> None:
