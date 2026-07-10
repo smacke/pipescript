@@ -191,6 +191,73 @@ def test_lower_pipelines_without_cursor() -> None:
     assert lower_pipelines("x |> f") is None
 
 
+# A macro's subscript is its own scope, so the `$` inside it belongs to the lambda
+# the macro induces. The macros whose effect on the piped value is known get folded;
+# the rest still bail. `test_macro_lowerings_match_the_runtime` pins the semantics.
+MACRO_LOWERINGS = [
+    # `do` runs its body for effect and the guards gate on it, so both hand the
+    # piped value straight back -- body and all, the type cannot change
+    ('["a"] |> do[print($)] |> $.', '((["a"])).'),
+    ('["a"] |> do{ print($) } |> $.', '((["a"])).'),
+    ('["a"] |> when[len($) > 0] |> $.', '((["a"])).'),
+    # a quick lambda in stage position is just applied to the piped value
+    ("[1] |> f[$ + [2]] |> $.", "((([1]) + [2]))."),
+    # the lazy variants yield the bare iterator
+    ("[1] |> imap[$ * 2] |> $.", "(map((lambda __ps_e: __ps_e * 2), ([1])))."),
+    ("[1] |> ifilter[$ > 0] |> $.", "(filter((lambda __ps_e: __ps_e > 0), ([1])))."),
+    # a macro nested *inside* a stage is a scope, not a stage head: the stage's own
+    # placeholder is the first `$`, and `f[...]`'s is left alone
+    (
+        '[(1, "b")] |> sorted($, key=f[$[1]]) |> $[0].',
+        '(sorted(([(1, "b")]), key=f[$[1]]))[0].',
+    ),
+]
+
+# The eager `map`/`filter` restore the input's container type, so their lowering is
+# the wrapper `MacroTracer._transform_ast_lambda_for_macro` builds. Spelled out once.
+_FUNCTOR = (
+    "(lambda __ps_c: (type(__ps_c) if type(__ps_c) in (frozenset, list, set, tuple) "
+    "else (lambda __ps_i: __ps_i))({builtin}((lambda __ps_e: {body}), __ps_c)))({seed})"
+)
+
+
+@pytest.mark.parametrize("code,expected", MACRO_LOWERINGS)
+def test_lower_macro_stages(code: str, expected: str) -> None:
+    assert lower_pipelines(code) == expected
+
+
+@pytest.mark.parametrize(
+    "code,builtin,body,seed",
+    [
+        ("[1] |> map[$ * 2] |> $.", "map", "__ps_e * 2", "([1])"),
+        ("[1] |> filter[$ > 0] |> $.", "filter", "__ps_e > 0", "([1])"),
+    ],
+)
+def test_lower_eager_functor_macros(code, builtin, body, seed) -> None:
+    inner = _FUNCTOR.format(builtin=builtin, body=body, seed=seed)
+    assert lower_pipelines(code) == f"({inner})."
+
+
+# Compose and partial application denote functions, so each lowers to that lambda.
+COMPOSE_LOWERINGS = [
+    ("h = f .> g\n", "h = (lambda *__ps_a, **__ps_k: (g)(((f))(*__ps_a, **__ps_k)))\n"),
+    ("h = f <. g\n", "h = (lambda *__ps_a, **__ps_k: ((f))((g)(*__ps_a, **__ps_k)))\n"),
+    (
+        "h = 5 $> pow\n",
+        "h = (lambda *__ps_a, **__ps_k: (pow)((5), *__ps_a, **__ps_k))\n",
+    ),
+    (
+        "h = pow <$ 5\n",
+        "h = (lambda *__ps_a, **__ps_k: ((pow))(5, *__ps_a, **__ps_k))\n",
+    ),
+]
+
+
+@pytest.mark.parametrize("code,expected", COMPOSE_LOWERINGS)
+def test_lower_compose_and_partial_ops(code: str, expected: str) -> None:
+    assert lower_pipelines(code) == expected
+
+
 BAILS = [
     # nothing to lower
     "no pipeline here.",
@@ -200,19 +267,25 @@ BAILS = [
     "$ |> sorted |> $.",
     "|> sorted |> $.",
     "xs |> f$(1) |> $.",
-    "xs .> f |> $.",
-    "xs |> f .> g |> $.",
     "xs |>> na",
+    # function exponentiation has no finite expression to hand a static analyzer
+    "xs |> collatz .** 20 |> $.",
     # the cursor is on the placeholder itself; substituting would rewrite the
     # very word being completed
     '["a"] |> $',
     '["a"] |> f($na',
-    # a macro subscript / brace block is its own scope: its `$` is not the piped value
-    "xs |> map[$ * 2] |> $.",
-    "xs |> do{ print($) } |> $.",
-    # distinct placeholders make the stage a multi-argument function
+    # the cursor is inside a macro's own scope, completing against *its* lambda
+    "xs |> map[$.",
+    # a macro whose effect on the piped value we don't model
+    "xs |> reduce[$ + $] |> $.",
+    "xs |> fork[$ |> a, $ |> b] |> $.",
+    "xs |> future[$ * 2] |> $.",
+    # a macro body that is itself a pipeline: its `$` is the macro's, not ours
+    "xs |> map[$ |> f] |> $.",
+    # distinct placeholders make the stage (or a macro body) a multi-arg function
     '["a"] |> f($v, $w) |> $.',
     '["a"] |> f($, $) |> $.',
+    "xs |> map[$ + $] |> $.",
     # a placeholder stage under a non-plain pipe is a multi-arg / reversed apply
     "xs *|> $.foo",
     # empty stages
@@ -223,6 +296,53 @@ BAILS = [
 @pytest.mark.parametrize("code", BAILS)
 def test_lower_pipelines_bails(code: str) -> None:
     assert lower_pipelines(code) is None
+
+
+# `(pipescript source, plain-Python expected value)`. The lowering models each
+# macro's effect on the piped value, so the two must agree -- including the
+# container type the eager `map`/`filter` restore, and the laziness of `imap`.
+RUNTIME_AGREEMENT = [
+    "[1, 2, 3] |> map[$ * 2]",
+    "{1, 2} |> map[$ * 2]",
+    "(1, 2) |> map[$ * 2]",
+    "[1, 2, 3] |> filter[$ > 1]",
+    "{1, 2, 3} |> filter[$ > 1]",
+    "[1, 2] |> imap[$ * 2] |> list",
+    "[1, 2] |> ifilter[$ > 1] |> list",
+    "[1, 2] |> do[len($)]",
+    "[1, 2] |> when[len($) > 1]",
+    "[1, 2] |> f[$ + [3]]",
+    "(len .> str) <| [1, 2]",
+    "(str <. len) <| [1, 2]",
+    "(2 $> pow) <| 5",
+    "(pow <$ 2) <| 5",
+]
+
+
+@pytest.mark.parametrize("code", RUNTIME_AGREEMENT)
+def test_macro_lowerings_match_the_runtime(code: str) -> None:
+    """The lowering is only useful if it denotes what the pipeline actually does.
+    Run both and compare: an inaccurate lowering hands jedi a wrong *type*, which is
+    worse than the bail-out it replaced."""
+    from IPython.core.interactiveshell import InteractiveShell
+
+    InteractiveShell.clear_instance()
+    shell = InteractiveShell.instance()
+    assert shell.run_cell("%load_ext pipescript").error_in_exec is None
+    result = shell.run_cell(code, store_history=True)
+    assert result.error_in_exec is None, result.error_in_exec
+
+    # a trailing newline makes the chain complete, so it lowers in value mode
+    lowered = lower_pipelines(code + "\n")
+    assert lowered is not None, code
+    actual = eval(compile(lowered.strip(), "<lowered>", "eval"), {})
+
+    expected = result.result
+    assert type(actual) is type(expected), (code, lowered)
+    if isinstance(expected, (list, set, tuple, str, int)):
+        assert actual == expected, (code, lowered)
+    else:  # a lazy iterator compares by exhaustion, not identity
+        assert list(actual) == list(expected), (code, lowered)
 
 
 def test_completion_token_and_tail_guard() -> None:
@@ -241,8 +361,8 @@ def test_completion_sources_prefers_lowered_then_legacy() -> None:
         "[1, 2] | sum | _.bit_",
     ]
     # nothing lowerable: only the legacy transform, and vanilla Python is untouched
-    assert cp._completion_sources("xs |> map[$*2] |> $.x", tracers) == [
-        "xs | map[_*2] | _.x"
+    assert cp._completion_sources("xs |> reduce[$+$] |> $.x", tracers) == [
+        "xs | reduce[_+_] | _.x"
     ]
     assert cp._completion_sources("os.pa", tracers) == ["os.pa"]
 

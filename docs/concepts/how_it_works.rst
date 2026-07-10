@@ -53,7 +53,10 @@ pipescript source:
   pipeline in the cell is desugared into the nested calls it denotes before jedi
   sees it, so ``["a", "b"] |> "\n".join($) |> $.`` completes ``str`` methods
   without the pipeline prefix having been executed -- and a name that a pipeline
-  binds (via ``=`` or ``|>>``) is typed wherever it is later used.
+  binds (via ``=`` or ``|>>``) is typed wherever it is later used. The desugaring
+  models the macros and the compose/partial operators as well, down to the
+  container type that ``map`` and ``filter`` restore; where it cannot model a
+  construct soundly it declines to lower it rather than guess at a type.
 - There is a run-time cost when pipescript syntax is actually used, but **none**
   for vanilla Python, even with the extension loaded. See :doc:`performance`.
 

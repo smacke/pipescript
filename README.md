@@ -816,6 +816,19 @@ result.<TAB>    # -> upper, splitlines, ...
 nums.<TAB>      # -> append, count, ...
 ```
 
+The lowering models the macros and operators too, so the container type `map` and
+`filter` restore survives, and so does the element type:
+
+```python
+{1, 2} |> map[$ * 2] |> $.<TAB>            # -> add, discard, ...  (a set, not a list)
+["a", "b"] |> map[$.upper()] |> $[0].<TAB> # -> upper, zfill, ...  (a str element)
+"5" |> (int .> float) |> $.<TAB>           # -> hex, is_integer, ...
+```
+
+Anything it cannot model soundly -- `reduce`, `fork`, function exponentiation, a
+macro body that is itself a pipeline -- falls back to the old behavior rather than
+guessing at a type.
+
 Implementation-wise, thanks to pyccolo's heavy lifting, I was able to write the
 initial release of pipescript entirely over the course of time off during the
 2025 holiday season. At the time of this writing, pipescript occupies about 2000

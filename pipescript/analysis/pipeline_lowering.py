@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 import tokenize
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from functools import lru_cache
 from typing import NamedTuple
 
@@ -64,30 +64,34 @@ _PIPE_OPS = {
     "<?**": "apply_dict",
     "<?*": "apply_tuple",
     "<?": "apply",
+    # The compose and partial-apply operators evaluate to *functions* rather than
+    # values, so each lowers to the lambda it denotes. Naming follows the handlers
+    # in ``PipelineTracer.transform_pipeline_compose_ops`` / ``_apply_ops``.
+    "**.>": "fcompose_dict",
+    "*.>": "fcompose_tuple",
+    ".>": "fcompose",
+    "<.**": "bcompose_dict",
+    "<.*": "bcompose_tuple",
+    "<.": "bcompose",
+    "**$>": "vpartial_dict",
+    "*$>": "vpartial_tuple",
+    "$>": "vpartial",
+    "<$**": "fpartial_dict",
+    "<$*": "fpartial_tuple",
+    "<$": "fpartial",
 }
 
-# Compose and partial-apply operators evaluate to *functions* rather than values;
-# lowering them soundly means synthesizing lambdas. Recognized only so we can
+# ``.**`` exponentiates a function by repeated composition, which has no
+# finite expression we can hand a static analyzer. Recognized only so we can
 # refuse to lower a chain containing one.
-_BAIL_OPS = frozenset(
-    {
-        "**.>",
-        "*.>",
-        ".>",
-        "<.**",
-        "<.*",
-        "<.",
-        "**$>",
-        "*$>",
-        "$>",
-        "<$**",
-        "<$*",
-        "<$",
-        ".**",
-    }
-)
+_BAIL_OPS = frozenset({".**"})
 
 _ALL_OPS = sorted(set(_PIPE_OPS) | _BAIL_OPS, key=len, reverse=True)
+
+# Every pipe operator ends with one of these two-character tails (the ``*``/``**``
+# variants merely prefix them), so a source containing none of them holds no chain
+# and can skip the scan entirely -- which is what keeps a vanilla-Python cell free.
+_EARLY_OUT_TOKENS = ("|>", "?>", "<|", "<?", ".>", "<.", "$>", "<$")
 
 _OPENERS = "([{"
 _CLOSERS = ")]}"
@@ -144,9 +148,35 @@ _PUNCT_BY_FIRST = _by_first_char(_PUNCT)
 
 _NAME_RE = re.compile(r"[A-Za-z_]\w*")
 _NUM_RE = re.compile(r"\d[\w.]*")
-# A macro's subscript (``map[$ * 2]``) or brace block (``do{ ... }``) is its own
-# scope: the ``$`` inside binds to the macro's lambda, not to the piped value.
+_MACRO_HEAD_RE = re.compile(r"([A-Za-z_]\w*)\s*([\[{])")
+_MACRO_SUB_RE = re.compile(r"([A-Za-z_]\w*)\s*\[")
+# A brace block (``do{ ... }``) carries statements, not an expression, so nothing
+# useful survives lowering it in place; only a macro whose *whole stage* is a brace
+# block (handled by ``_macro_stage``) gets folded.
 _BRACE_BLOCK_RE = re.compile(r"[A-Za-z_]\w*\s*\{")
+
+# Macros that hand the piped value straight back: ``do`` runs its body for effect,
+# and the guards yield the value (or ``pipeline_null``, which coalesces to None).
+_IDENTITY_MACROS = frozenset({"do", "expect", "unless", "until", "when"})
+
+# Macros that lift a function over the piped value. ``(builtin, preserves_type)``:
+# the eager variants restore the input's container type, exactly as
+# ``MacroTracer._transform_ast_lambda_for_macro`` does; the lazy ``i`` variants
+# return the bare iterator.
+_FUNCTOR_MACROS = {
+    "map": ("map", True),
+    "filter": ("filter", True),
+    "imap": ("map", False),
+    "ifilter": ("filter", False),
+}
+
+# Names we synthesize into the lowered source. Dunder-prefixed so IPython hides
+# them from completion menus, and stable so nesting merely shadows.
+_ELEM = "__ps_e"
+_CONT = "__ps_c"
+_IDENT = "__ps_i"
+_ARGS = "__ps_a"
+_KWARGS = "__ps_k"
 
 
 _EXTRA_STOP_KEYWORDS = frozenset({"for", "as", "with", "import", "from", "async"})
@@ -309,22 +339,168 @@ def _any_in(starts: list[int], lo: int, hi: int) -> bool:
     return bisect_left(starts, lo) < bisect_left(starts, hi)
 
 
-def _is_opaque(scan: _Scan, lo: int, hi: int, macros: frozenset[str]) -> bool:
-    """True if ``[lo, hi)`` holds a construct whose placeholders are not ours to
-    substitute: a nested chain, a compose/partial operator, or a macro scope."""
-    if _any_in(scan.barrier_starts, lo, hi):
-        return True
-    text = scan.blanked[lo:hi]
-    if _BRACE_BLOCK_RE.search(text):
-        return True
-    for match in _NAME_RE.finditer(text):
-        if match.group() in macros and text[match.end() :].lstrip().startswith("["):
-            return True
-    return False
+def _is_opaque(scan: _Scan, lo: int, hi: int) -> bool:
+    """True if ``[lo, hi)`` holds a construct we cannot lower: a nested chain, a
+    function-power operator, a partial call, or a statement-carrying brace block."""
+    return _any_in(scan.barrier_starts, lo, hi) or bool(
+        _BRACE_BLOCK_RE.search(scan.blanked[lo:hi])
+    )
+
+
+class _Spans(NamedTuple):
+    """Macro-scope interiors, ascending by ``start`` so a range query can bisect."""
+
+    starts: list[int]
+    ends: list[int]
+
+
+def _macro_spans(scan: _Scan, macros: frozenset[str]) -> _Spans:
+    """Interiors of every macro subscript, e.g. the ``$ * 2`` of ``map[$ * 2]``.
+
+    A macro's subscript is its own scope: the ``$`` inside binds to the lambda the
+    macro induces, not to the value piped into the stage around it. This mirrors
+    ``PlaceholderReplacer.visit_Subscript``, which defers those placeholders at
+    runtime for the same reason -- so ``xs |> sorted($, key=f[$[1]])`` has exactly
+    one placeholder of its own, the first.
+    """
+    starts: list[int] = []
+    ends: list[int] = []
+    text = scan.blanked
+    for match in _MACRO_SUB_RE.finditer(text):
+        if match.group(1) not in macros:
+            continue
+        opener = match.end() - 1
+        starts.append(opener + 1)
+        ends.append(scan.close_of.get(opener, len(text)))
+    return _Spans(starts, ends)
 
 
 def _placeholders(scan: _Scan, lo: int, hi: int) -> list[_Tok]:
     return scan.phs[bisect_left(scan.ph_starts, lo) : bisect_left(scan.ph_starts, hi)]
+
+
+def _own_placeholders(scan: _Scan, lo: int, hi: int, spans: _Spans) -> list[_Tok]:
+    """Placeholders in ``[lo, hi)`` that belong to it, rather than to a macro scope
+    nested inside it.
+
+    Only spans that start *strictly* after ``lo`` are nested. A span starting at
+    ``lo`` is the range itself -- a macro's body, whose placeholders are exactly the
+    ones we came to substitute -- and one starting before ``lo`` encloses the range,
+    so the range's placeholders belong to it, not to us. Both boundaries matter:
+    ``map[$ * 2]``'s body must see its ``$``, and the seed of ``map[$ |> f]``'s
+    nested chain must too, so that chain is recognized as a function and left alone.
+    """
+    phs = _placeholders(scan, lo, hi)
+    if not phs or not spans.starts:
+        return phs
+    kept = []
+    for ph in phs:
+        # only spans opening in ``(lo, ph.start]`` can contain ``ph``, so bisect to
+        # them rather than sweeping every macro in the cell
+        first = bisect_right(spans.starts, lo)
+        last = bisect_right(spans.starts, ph.start)
+        if not any(spans.ends[i] > ph.start for i in range(first, last)):
+            kept.append(ph)
+    return kept
+
+
+def _macro_stage(
+    scan: _Scan, lo: int, hi: int, macros: frozenset[str]
+) -> tuple[str, int, int, str] | None:
+    """``(name, body_lo, body_hi, bracket)`` if ``[lo, hi)`` is exactly one macro
+    invocation, ``map[$ * 2]`` or ``do{ ... }``. A macro merely *nested* in a larger
+    stage is not a stage head -- it is a scope, handled by ``_macro_spans``."""
+    text = scan.blanked
+    while lo < hi and text[lo].isspace():
+        lo += 1
+    while hi > lo and text[hi - 1].isspace():
+        hi -= 1
+    match = _MACRO_HEAD_RE.match(text, lo)
+    if match is None or match.group(1) not in macros:
+        return None
+    opener = match.end() - 1
+    # the macro's bracket must close at the very end of the stage
+    if scan.close_of.get(opener) != hi - 1:
+        return None
+    return match.group(1), opener + 1, hi - 1, match.group(2)
+
+
+def _fold_macro(
+    code: str,
+    scan: _Scan,
+    name: str,
+    lo: int,
+    hi: int,
+    bracket: str,
+    expr: str,
+    spans: _Spans,
+) -> str | None:
+    """The value a macro stage yields when ``expr`` is piped into it."""
+    if name in _IDENTITY_MACROS:
+        # `do` runs the body for effect; the guards gate on it. Either way the piped
+        # value comes back out, so the body cannot affect the type -- so the body is
+        # simply dropped, and it does not matter whether it holds statements.
+        return expr
+    if name != "f" and name not in _FUNCTOR_MACROS:
+        return None
+    # A brace body carries statements, which cannot be substituted into the lambda
+    # these macros lift; only a subscript body is an expression.
+    if bracket != "[" or _is_opaque(scan, lo, hi):
+        return None
+    phs = _own_placeholders(scan, lo, hi, spans)
+    names = {ph.text for ph in phs}
+    if len(names) != 1 or (names == {"$"} and len(phs) > 1):
+        # no placeholder, or several -- the induced lambda is not the one-argument
+        # function these macros lift over the piped value
+        return None
+    if name == "f":
+        # a quick lambda in stage position is just applied to the piped value
+        return "(" + _substitute(code, lo, hi, phs, expr).strip() + ")"
+    builtin, preserves_type = _FUNCTOR_MACROS[name]
+    body = _substitute(code, lo, hi, phs, _ELEM).strip()
+    func = f"(lambda {_ELEM}: {body})"
+    if not preserves_type:
+        return f"{builtin}({func}, {expr})"
+    # The eager variants rebuild the input's container around the result, so
+    # `[1, 2] |> map[$ * 2]` is a list and `{1, 2} |> map[$ * 2]` a set. jedi infers
+    # through this, element type included.
+    return (
+        f"(lambda {_CONT}: (type({_CONT}) if type({_CONT}) in "
+        f"(frozenset, list, set, tuple) else (lambda {_IDENT}: {_IDENT}))"
+        f"({builtin}({func}, {_CONT})))({expr})"
+    )
+
+
+def _apply_op(kind: str, expr: str, stage: str) -> str:
+    """Combine the accumulated value/function ``expr`` with the next ``stage``.
+
+    ``expr`` is always the operator's left operand. Which side is the function
+    depends on the operator: ``|>`` pipes a value rightwards into one, ``<|`` and
+    ``<$`` take the function on the left.
+    """
+    star = "*" if kind.endswith("_tuple") else ("**" if kind.endswith("_dict") else "")
+    family = kind.split("_")[0]
+    if family == "pipe":
+        return f"({stage})({star}{expr})"
+    if family == "apply":
+        # ``f <| x``: the accumulated expr is the function, the stage the value
+        return f"({expr})({star}{stage})"
+
+    # The rest denote functions, so each becomes the lambda it composes to.
+    call = f"*{_ARGS}, **{_KWARGS}"
+    if family == "fcompose":  # ``f .> g`` is g after f
+        body = f"({stage})({star}({expr})({call}))"
+    elif family == "bcompose":  # ``f <. g`` is f after g
+        body = f"({expr})({star}({stage})({call}))"
+    else:
+        # ``x $> f`` and ``f <$ x`` both bind x as f's leading argument; they differ
+        # only in which operand is which.
+        func, bound = (stage, expr) if family == "vpartial" else (expr, stage)
+        if star == "**":
+            body = f"({func})(*{_ARGS}, **{bound}, **{_KWARGS})"
+        else:
+            body = f"({func})({star}{bound}, {call})"
+    return f"(lambda *{_ARGS}, **{_KWARGS}: {body})"
 
 
 def _substitute(code: str, lo: int, hi: int, phs: list[_Tok], expr: str) -> str:
@@ -409,7 +585,12 @@ def _chain_span(
 
 
 def _fold(
-    code: str, scan: _Scan, chain: _Chain, macros: frozenset[str], cursor_mode: bool
+    code: str,
+    scan: _Scan,
+    chain: _Chain,
+    macros: frozenset[str],
+    spans: _Spans,
+    cursor_mode: bool,
 ) -> str | None:
     """The nested-call expression a chain denotes, or ``None`` if it holds anything
     we cannot lower soundly. Under ``cursor_mode`` the final stage is the partially
@@ -425,8 +606,8 @@ def _fold(
 
     if (
         not seed.strip()
-        or _is_opaque(scan, chain.start, ops[0].start, macros)
-        or _placeholders(scan, chain.start, ops[0].start)
+        or _is_opaque(scan, chain.start, ops[0].start)
+        or _own_placeholders(scan, chain.start, ops[0].start, spans)
     ):
         # An empty seed is a leading-``|>`` thunk and a seed with a placeholder is
         # an undetermined pipeline: both denote a function, not a value.
@@ -449,9 +630,24 @@ def _fold(
                 return new
             expr = new
             continue
-        if _is_opaque(scan, lo, hi, macros):
+
+        macro = _macro_stage(scan, lo, hi, macros)
+        if macro is not None:
+            # The cursor inside a macro's own scope is completing against that
+            # macro's induced lambda, not against the piped value.
+            if (cursor_mode and last) or kind != "pipe":
+                return None
+            folded = _fold_macro(code, scan, *macro, expr, spans)
+            if folded is None:
+                return None
+            if last:
+                return folded
+            expr = f"({folded})"
+            continue
+
+        if _is_opaque(scan, lo, hi):
             return None
-        phs = _placeholders(scan, lo, hi)
+        phs = _own_placeholders(scan, lo, hi, spans)
 
         if cursor_mode and last:
             # A final stage with no placeholder is an ordinary expression in the
@@ -480,13 +676,8 @@ def _fold(
             new = new.lstrip() if (cursor_mode and last) else new.strip()
         elif not stage:
             return None
-        elif kind.startswith("apply"):
-            star = {"apply": "", "apply_tuple": "*", "apply_dict": "**"}[kind]
-            # ``f <| x``: the accumulated expr is the function, the stage the value
-            new = f"({expr})({star}{stage})"
         else:
-            star = {"pipe": "", "pipe_tuple": "*", "pipe_dict": "**"}[kind]
-            new = f"({stage})({star}{expr})"
+            new = _apply_op(kind, expr, stage)
 
         if last:
             return new
@@ -507,35 +698,41 @@ def _splice(code: str, chain: _Chain, folded: str) -> str:
 _MAX_ROUNDS = 32
 
 
-def _lower_complete_chains(code: str, tail_is_cursor: bool) -> str | None:
-    """Lower every complete chain that can be folded, in one pass, or ``None``.
+def _lower_complete_chains(code: str, tail_is_cursor: bool) -> tuple[str, bool] | None:
+    """Lower every complete chain that can be folded, in one pass. Returns the
+    rewritten source and whether every candidate folded, or ``None`` if none did.
 
     A foldable chain never contains another chain -- a stage or seed holding a pipe
     operator is opaque, so its chain would not fold. The chains picked here are
     therefore pairwise disjoint and can all be spliced in a single right-to-left
     sweep, which is what keeps this linear in the size of the cell rather than
     quadratic in the number of chains. Nesting still costs a round: an outer chain
-    only becomes foldable once the chain inside it has become plain Python.
+    only becomes foldable once the chain inside it has become plain Python. So if
+    nothing was skipped, no further round can find anything, and the caller stops --
+    which matters because the folded source is longer than what it replaced.
     """
     scan = _scan(code)
     if scan is None:
         return None
     macros = _macro_names()
+    spans = _macro_spans(scan, macros)
     n = len(code)
+    candidates = 0
     picks: list[tuple[_Chain, str]] = []
     for chain in _chains(scan, n):
         # When the source ends at a cursor, a chain running to that end is (or
         # encloses) the one being typed into, so its last stage is incomplete.
         if tail_is_cursor and chain.end >= n:
             continue
-        folded = _fold(code, scan, chain, macros, cursor_mode=False)
+        candidates += 1
+        folded = _fold(code, scan, chain, macros, spans, cursor_mode=False)
         if folded is not None:
             picks.append((chain, folded))
     if not picks:
         return None
     for chain, folded in sorted(picks, key=lambda pick: pick[0].start, reverse=True):
         code = _splice(code, chain, folded)
-    return code
+    return code, len(picks) == candidates
 
 
 def _lower_cursor_chain(code: str) -> str | None:
@@ -545,6 +742,8 @@ def _lower_cursor_chain(code: str) -> str | None:
     scan = _scan(code)
     if scan is None:
         return None
+    macros = _macro_names()
+    spans = _macro_spans(scan, macros)
     n = len(code)
     for chain in _chains(scan, n):
         if chain.end < n:
@@ -552,7 +751,7 @@ def _lower_cursor_chain(code: str) -> str | None:
         # ``_chains`` is innermost-first, so the first chain reaching the cursor is
         # the one it belongs to. An enclosing chain also reaches the end, but its
         # final stage is the one we just tried to fold.
-        folded = _fold(code, scan, chain, _macro_names(), cursor_mode=True)
+        folded = _fold(code, scan, chain, macros, spans, cursor_mode=True)
         return None if folded is None else _splice(code, chain, folded)
     return None
 
@@ -570,16 +769,21 @@ def lower_pipelines(code: str, cursor_at_end: bool = True) -> str | None:
     and the chain it ends inside gets a final, stricter pass that leaves the token
     being completed untouched. Pass ``False`` for source that holds no cursor.
     """
-    if not any(op in code for op in ("|>", "?>", "<|", "<?")):
+    if not any(op in code for op in _EARLY_OUT_TOKENS):
         return None
     original = code
     for _ in range(_MAX_ROUNDS):
-        lowered = _lower_complete_chains(code, tail_is_cursor=cursor_at_end)
-        if lowered is None or lowered == code:
+        result = _lower_complete_chains(code, tail_is_cursor=cursor_at_end)
+        if result is None:
+            break
+        lowered, folded_everything = result
+        if lowered == code:
             break
         code = lowered
+        if folded_everything:
+            break
     if cursor_at_end:
-        lowered = _lower_cursor_chain(code)
-        if lowered is not None:
-            code = lowered
+        at_cursor = _lower_cursor_chain(code)
+        if at_cursor is not None:
+            code = at_cursor
     return code if code != original else None
