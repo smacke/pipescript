@@ -1,6 +1,15 @@
 History
 =======
 
+0.0.27 (2026-07-11)
+-------------------
+* Type-aware completions: statically desugar pipelines before handing them to jedi, so ``xs |> "\n".join($) |> $.`` completes against the real result type without having to run the prefix first;
+* Lower every pipeline in the cell (not just the one under the cursor), so names bound by ``|>>`` and nested chains are typed too;
+* Fold macro stages, ``compose``/partial-application, and ``map``/``filter`` into their lowerings for completion;
+* Load via pyccolo's IPython extension instead of patching the shell, with consistent tracer ordering under plain IPython and ipyflow;
+* Implement ``unload_ipython_extension`` (``%unload_ext pipescript``);
+* Add a Sphinx/Read the Docs documentation site;
+
 0.0.26 (2026-07-07)
 -------------------
 * Fixes for IPython 9 and JupyterLite;
